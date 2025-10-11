@@ -357,15 +357,24 @@ const firebaseConfig = {
                 };
             },
 
-            filterLockedStats(characters) {
-                const filtered = JSON.parse(JSON.stringify(characters));
-                Object.values(filtered).forEach(char => {
-                    char.vault.forEach(item => {
-                        item.stats = item.stats.filter(stat => !stat.locked);
-                    });
-                });
-                return filtered;
-            },
+filterLockedStats(characters) {
+    const filtered = JSON.parse(JSON.stringify(characters));
+    Object.values(filtered).forEach(char => {
+        // Ensure vault exists and is an array
+        if (!Array.isArray(char.vault)) {
+            char.vault = [];
+        }
+
+        char.vault.forEach(item => {
+            if (Array.isArray(item.stats)) {
+                item.stats = item.stats.filter(stat => !stat.locked);
+            } else {
+                item.stats = [];
+            }
+        });
+    });
+    return filtered;
+}
 
             disconnectSession() {
                 if (this.state.session.ref) {
