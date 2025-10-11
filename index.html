@@ -1,977 +1,971 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>D&D 5e Equipment Tracker</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
-    <style>
-        .rarity-common { border-left: 4px solid #9ca3af; }
-        .rarity-uncommon { border-left: 4px solid #10b981; }
-        .rarity-rare { border-left: 4px solid #3b82f6; }
-        .rarity-veryrare { border-left: 4px solid #8b5cf6; }
-        .rarity-legendary { border-left: 4px solid #f59e0b; }
-        .rarity-artifact { border-left: 4px solid #ef4444; }
-        .slot-empty { border: 2px dashed #d1d5db; }
-        .slot-filled { border: 2px solid #3b82f6; }
-        .pulse-online { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: .5; }
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>D&D 5e Equipment Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <style>
+    .rarity-common { border-left: 4px solid #9ca3af; }
+    .rarity-uncommon { border-left: 4px solid #10b981; }
+    .rarity-rare { border-left: 4px solid #3b82f6; }
+    .rarity-veryrare { border-left: 4px solid #8b5cf6; }
+    .rarity-legendary { border-left: 4px solid #f59e0b; }
+    .rarity-artifact { border-left: 4px solid #ef4444; }
+    .slot-empty { border: 2px dashed #d1d5db; }
+    .slot-filled { border: 2px solid #3b82f6; }
+    .pulse-online { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+  </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
-    <div id="app" class="container mx-auto p-4 max-w-7xl">
-        <!-- Header -->
-        <div class="bg-gray-800 rounded-lg p-4 mb-6">
-            <div class="flex justify-between items-center mb-4">
-                <h1 class="text-3xl font-bold text-blue-400">D&D 5e Equipment Tracker</h1>
-                <div id="sessionStatus" class="flex items-center gap-2">
-                    <span class="text-sm text-gray-400">Offline</span>
-                </div>
-            </div>
-            
-            <!-- Session Controls -->
-            <div id="sessionControls" class="flex gap-4 items-center flex-wrap">
-                <button onclick="app.showHostModal()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded">
-                    🎲 Host Session (DM)
-                </button>
-                <button onclick="app.showJoinModal()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">
-                    👥 Join Session (Player)
-                </button>
-                <button onclick="app.showExportModal()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded">
-                    💾 Export Backup
-                </button>
-                <button onclick="app.showImportModal()" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded">
-                    📥 Import Backup
-                </button>
-            </div>
-
-            <!-- Active Session Info -->
-            <div id="activeSessionInfo" class="hidden mt-4 p-4 bg-gray-700 rounded-lg">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <div class="text-sm text-gray-400">Session Code</div>
-                        <div class="text-2xl font-bold text-green-400" id="sessionCode">------</div>
-                    </div>
-                    <button onclick="app.disconnectSession()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded">
-                        Disconnect
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Character Selection -->
-        <div class="bg-gray-800 rounded-lg p-4 mb-6">
-            <div class="flex gap-4 items-center flex-wrap">
-                <select id="characterSelect" onchange="app.switchCharacter(this.value)" class="bg-gray-700 text-white px-4 py-2 rounded flex-grow">
-                </select>
-                <button onclick="app.showCreateCharacterModal()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded" id="newCharBtn">
-                    New Character
-                </button>
-                <button onclick="app.cloneCharacter()" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded" id="cloneCharBtn">
-                    Clone
-                </button>
-                <button onclick="app.deleteCharacter()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded" id="deleteCharBtn">
-                    Delete
-                </button>
-                <button onclick="app.undo()" id="undoBtn" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded hidden">
-                    Undo Delete
-                </button>
-            </div>
-        </div>
-
-        <!-- Main Content -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <!-- Equipment Slots -->
-            <div class="lg:col-span-2">
-                <div class="bg-gray-800 rounded-lg p-6">
-                    <h2 class="text-2xl font-bold mb-4 text-blue-300">Equipment Slots</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="equipmentSlots"></div>
-                </div>
-
-                <!-- Total Stats -->
-                <div class="bg-gray-800 rounded-lg p-6 mt-6">
-                    <h2 class="text-2xl font-bold mb-4 text-blue-300">Total Stats</h2>
-                    <div id="totalStats" class="grid grid-cols-2 md:grid-cols-3 gap-3"></div>
-                </div>
-            </div>
-
-            <!-- Vault -->
-            <div>
-                <div class="bg-gray-800 rounded-lg p-6">
-                    <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-2xl font-bold text-blue-300">Item Vault</h2>
-                        <button onclick="app.showCreateItemModal()" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm" id="addItemBtn">
-                            + Add Item
-                        </button>
-                    </div>
-                    <input type="text" id="vaultSearch" oninput="app.filterVault(this.value)" 
-                        placeholder="Search items..." class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
-                    <div id="vaultItems" class="space-y-2 max-h-96 overflow-y-auto"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modals -->
-    <div id="modalContainer"></div>
-
-   <script>
-  const SLOTS = ['Head', 'Amulet', 'Cloak', 'Armor', 'Belt', 'Gloves', 'Ring 1', 'Ring 2',
-                 'Main Hand', 'Off Hand', 'Shield', 'Boots', 'Misc 1', 'Misc 2'];
-  const RARITIES = ['Common', 'Uncommon', 'Rare', 'Very Rare', 'Legendary', 'Artifact'];
-
-  // --- Firebase (replace with your own config if needed)
-  const firebaseConfig = {
-    apiKey: "AIzaSyBuVrJKcWVpxqSSVAzeVSnFAggRmlcPHao",
-    authDomain: "dndequipmenttool.firebaseapp.com",
-    projectId: "dndequipmenttool",
-    storageBucket: "dndequipmenttool.firebasestorage.app",
-    messagingSenderId: "237918823599",
-    appId: "1:237918823599:web:d4da5bd6148532a544605a"
-  };
-
-  let firebaseInitialized = false;
-  try {
-    firebase.initializeApp(firebaseConfig);
-    firebaseInitialized = true;
-  } catch (e) {
-    console.warn('Firebase not configured. Using offline mode only.');
-  }
-
-  // ----- Normalizers ---------------------------------------------------------
-  function normalizeStat(stat) {
-    return {
-      name: stat?.name || "",
-      value: stat?.value || "",
-      locked: !!stat?.locked
-    };
-  }
-
-  function normalizeItem(item) {
-    if (!item || typeof item !== 'object') {
-      return { id: Date.now().toString(), name: "Unnamed Item", rarity: "Common", stats: [], equipped: false };
-    }
-    return {
-      id: item.id || Date.now().toString(),
-      name: item.name || "Unnamed Item",
-      rarity: item.rarity || "Common",
-      stats: Array.isArray(item.stats) ? item.stats.map(normalizeStat) : [],
-      equipped: !!item.equipped
-    };
-  }
-
-  function normalizeCharacter(char) {
-    if (!char || typeof char !== 'object') {
-      return { id: Date.now().toString(), name: "Unnamed Character", equipment: {}, vault: [] };
-    }
-    const vault = Array.isArray(char.vault) ? char.vault.map(normalizeItem) : [];
-    const equipment = (char.equipment && typeof char.equipment === 'object') ? { ...char.equipment } : {};
-    Object.keys(equipment).forEach(slot => {
-      if (!vault.find(i => i.id === equipment[slot])) delete equipment[slot];
-    });
-    return { id: char.id || Date.now().toString(), name: char.name || "Unnamed Character", equipment, vault };
-  }
-
-  function normalizeAllCharacters(characters) {
-    const normalized = {};
-    if (!characters || typeof characters !== 'object') return normalized;
-    Object.entries(characters).forEach(([id, char]) => {
-      normalized[id] = normalizeCharacter(char);
-    });
-    return normalized;
-  }
-
-  // --- Permissions + sync helpers -------------------------------------------
-  function canEditCurrent(app) {
-    if (app.state.session.isDM) return true;
-    if (!app.state.session.active) return true;
-    return app.state.session.assignedCharacter &&
-           app.state.currentCharacter === app.state.session.assignedCharacter;
-  }
-
-  // Single source of truth for sending 1 character up to Firebase.
-  function syncCharacterToFirebase(app, charId) {
-    if (!app.state.session.active || !app.state.session.ref || !charId) return;
-    const char = app.state.characters[charId];
-    if (!char) return;
-    const charRef = app.state.session.ref.child('characters/' + charId);
-    // always update a single character path (never set() the whole object)
-    charRef.update(char).catch(console.error);
-  }
-
-  // --- Claim/Create modal ----------------------------------------------------
-  function showClaimCharacterModal(appInstance) {
-    const chars = Object.values(appInstance.state.characters || {});
-    const options = chars.map(c => `<option value="${c.id}">${c.name || 'Unnamed Character'}</option>`).join('');
-
-    const modal = `
-      <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
-        <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
-          <h3 class="text-xl font-bold mb-4">Claim or Create Character</h3>
-          ${chars.length ? `
-            <label class="text-sm text-gray-300 mb-1 block">Pick an existing one:</label>
-            <select id="claimSelect" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
-              ${options}
-            </select>
-            <button class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded mb-3"
-                    onclick="(function(){
-                      const id = document.getElementById('claimSelect').value;
-                      app.claimCharacter(id);
-                      document.querySelector('.fixed.inset-0').remove();
-                    })()">
-              ✅ Claim Selected
-            </button>
-          ` : `<div class="text-sm text-gray-400 mb-4">No characters yet. Create one to get started.</div>`}
-          <div class="border-t border-gray-700 my-3"></div>
-          <label class="text-sm text-gray-300 mb-1 block">...or create new:</label>
-          <input id="newCharName" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-3" placeholder="New character name">
-          <button class="w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded"
-                  onclick="(function(){
-                    const name = document.getElementById('newCharName').value || 'New Character';
-                    app.createCharacter(name, true);
-                    document.querySelector('.fixed.inset-0').remove();
-                  })()">
-            ➕ Create & Use
-          </button>
+  <div id="app" class="container mx-auto p-4 max-w-7xl">
+    <!-- Header -->
+    <div class="bg-gray-800 rounded-lg p-4 mb-6">
+      <div class="flex justify-between items-center mb-4">
+        <h1 class="text-3xl font-bold text-blue-400">D&D 5e Equipment Tracker</h1>
+        <div id="sessionStatus" class="flex items-center gap-2">
+          <span class="text-sm text-gray-400">Offline</span>
         </div>
       </div>
-    `;
-    document.getElementById('modalContainer').innerHTML = modal;
-  }
 
-  // --- App -------------------------------------------------------------------
-  const app = {
-    state: {
-      characters: {},
-      currentCharacter: null,
-      isDMMode: false,
-      undoStack: [],
-      session: {
-        active: false,
-        code: null,
-        isDM: false,
-        assignedCharacter: null,
-        ref: null
-      }
-    },
+      <!-- Session Controls -->
+      <div id="sessionControls" class="flex gap-4 items-center flex-wrap">
+        <button onclick="app.showHostModal()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded">🎲 Host Session (DM)</button>
+        <button onclick="app.showJoinModal()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">👥 Join Session (Player)</button>
+        <button onclick="app.showExportModal()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded">💾 Export Backup</button>
+        <button onclick="app.showImportModal()" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded">📥 Import Backup</button>
+      </div>
 
-    // --- lifecycle -----------------------------------------------------------
-    init() {
-      this.loadState();
-      if (Object.keys(this.state.characters).length === 0) {
-        this.createCharacter('New Character');
-      }
-      this.render();
-    },
+      <!-- Active Session Info -->
+      <div id="activeSessionInfo" class="hidden mt-4 p-4 bg-gray-700 rounded-lg">
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="text-sm text-gray-400">Session Code</div>
+            <div class="text-2xl font-bold text-green-400" id="sessionCode">------</div>
+          </div>
+          <button onclick="app.disconnectSession()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded">Disconnect</button>
+        </div>
+      </div>
+    </div>
 
-    loadState() {
-      const saved = localStorage.getItem('dndEquipmentTracker');
-      if (saved) {
-        try {
+    <!-- Character Selection -->
+    <div class="bg-gray-800 rounded-lg p-4 mb-6">
+      <div class="flex gap-4 items-center flex-wrap">
+        <select id="characterSelect" onchange="app.switchCharacter(this.value)" class="bg-gray-700 text-white px-4 py-2 rounded flex-grow"></select>
+        <button onclick="app.showCreateCharacterModal()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded" id="newCharBtn">New Character</button>
+        <button onclick="app.cloneCharacter()" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded" id="cloneCharBtn">Clone</button>
+        <button onclick="app.deleteCharacter()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded" id="deleteCharBtn">Delete</button>
+        <button onclick="app.undo()" id="undoBtn" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded hidden">Undo Delete</button>
+      </div>
+    </div>
+
+    <!-- World Buffs -->
+    <div class="bg-gray-800 rounded-lg p-6 mb-6">
+      <h2 class="text-2xl font-bold mb-4 text-blue-300">World Buffs</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="worldBuffs"></div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Equipment Slots -->
+      <div class="lg:col-span-2">
+        <div class="bg-gray-800 rounded-lg p-6">
+          <h2 class="text-2xl font-bold mb-4 text-blue-300">Equipment Slots</h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="equipmentSlots"></div>
+        </div>
+
+        <!-- Total Stats -->
+        <div class="bg-gray-800 rounded-lg p-6 mt-6">
+          <h2 class="text-2xl font-bold mb-4 text-blue-300">Total Stats</h2>
+          <div id="totalStats" class="grid grid-cols-2 md:grid-cols-3 gap-3"></div>
+        </div>
+      </div>
+
+      <!-- Vault (shared) -->
+      <div>
+        <div class="bg-gray-800 rounded-lg p-6">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-2xl font-bold text-blue-300">Item Vault (Shared)</h2>
+            <button onclick="app.showCreateItemModal()" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm" id="addItemBtn">+ Add Item</button>
+          </div>
+          <input type="text" id="vaultSearch" oninput="app.filterVault(this.value)" placeholder="Search items..." class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+          <div id="vaultItems" class="space-y-2 max-h-96 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modals -->
+  <div id="modalContainer"></div>
+
+  <script>
+    const SLOTS = ['Head','Amulet','Cloak','Armor','Belt','Gloves','Ring 1','Ring 2','Main Hand','Off Hand','Shield','Boots','Misc 1','Misc 2'];
+    const WORLD_BUFF_SLOTS = ['World Buff 1','World Buff 2','World Buff 3'];
+    const RARITIES = ['Common','Uncommon','Rare','Very Rare','Legendary','Artifact'];
+
+    // Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyBuVrJKcWVpxqSSVAzeVSnFAggRmlcPHao",
+      authDomain: "dndequipmenttool.firebaseapp.com",
+      projectId: "dndequipmenttool",
+      storageBucket: "dndequipmenttool.firebasestorage.app",
+      messagingSenderId: "237918823599",
+      appId: "1:237918823599:web:d4da5bd6148532a544605a"
+    };
+    let firebaseInitialized = false;
+    try { firebase.initializeApp(firebaseConfig); firebaseInitialized = true; } catch { console.warn('Firebase not configured. Using offline mode only.'); }
+
+    // ---------- Normalizers ----------
+    function normalizeStat(stat){
+      return { name: (stat?.name||'').trim(), description: (stat?.description||'').toString(), locked: !!stat?.locked };
+    }
+    function normalizeItem(item){
+      if (!item || typeof item !== 'object') return { id: Date.now().toString(), name:'Unnamed Item', rarity:'Common', stats:[], equipped:false };
+      return {
+        id: item.id || Date.now().toString(),
+        name: item.name || 'Unnamed Item',
+        rarity: item.rarity || 'Common',
+        stats: Array.isArray(item.stats) ? item.stats.map(normalizeStat) : [],
+      };
+    }
+    function normalizeCharacter(char){
+      if (!char || typeof char !== 'object') return { id: Date.now().toString(), name:'Unnamed Character', equipment:{}, worldBuffs:{} };
+      const equipment = (char.equipment && typeof char.equipment==='object') ? { ...char.equipment } : {};
+      const worldBuffs = (char.worldBuffs && typeof char.worldBuffs==='object') ? { ...char.worldBuffs } : {};
+      return { id: char.id || Date.now().toString(), name: char.name || 'Unnamed Character', equipment, worldBuffs };
+    }
+    function normalizeAllCharacters(chars){
+      const out = {};
+      if (!chars || typeof chars!=='object') return out;
+      Object.entries(chars).forEach(([id,c])=> out[id]=normalizeCharacter(c));
+      return out;
+    }
+
+    // ---------- Permissions ----------
+    function canEditCurrent(app){
+      if (app.state.session.isDM) return true;
+      if (!app.state.session.active) return true;
+      return app.state.session.assignedCharacter && app.state.currentCharacter === app.state.session.assignedCharacter;
+    }
+    function canEditWorldBuffs(app){ return app.state.session.isDM || !app.state.session.active; }
+    function canManageItems(app){ return app.state.session.isDM || !app.state.session.active; }
+
+    // ---------- Firebase sync helpers ----------
+    function syncCharacterToFirebase(app, charId){
+      if (!app.state.session.active || !app.state.session.ref || !charId) return;
+      const char = app.state.characters[charId];
+      if (!char) return;
+      app.state.session.ref.child('characters/'+charId).update(char).catch(console.error);
+    }
+    function syncVaultToFirebase(app){
+      if (!app.state.session.active || !app.state.session.ref) return;
+      if (!app.state.session.isDM) return; // only DM writes vault
+      app.state.session.ref.child('vault').set(app.state.vault).catch(console.error);
+    }
+
+    // ---------- Claim/Create modal ----------
+    function showClaimCharacterModal(appInstance){
+      const chars = Object.values(appInstance.state.characters || {});
+      const options = chars.map(c=>`<option value="${c.id}">${c.name || 'Unnamed Character'}</option>`).join('');
+      const modal = `
+        <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+          <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+            <h3 class="text-xl font-bold mb-4">Claim or Create Character</h3>
+            ${chars.length? `
+              <label class="text-sm text-gray-300 mb-1 block">Pick an existing one:</label>
+              <select id="claimSelect" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">${options}</select>
+              <button class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded mb-3" onclick="(function(){ const id=document.getElementById('claimSelect').value; app.claimCharacter(id); document.querySelector('.fixed.inset-0').remove(); })()">✅ Claim Selected</button>
+            ` : `<div class="text-sm text-gray-400 mb-4">No characters yet. Create one to get started.</div>`}
+            <div class="border-t border-gray-700 my-3"></div>
+            <label class="text-sm text-gray-300 mb-1 block">...or create new:</label>
+            <input id="newCharName" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-3" placeholder="New character name">
+            <button class="w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded" onclick="(function(){ const name=document.getElementById('newCharName').value||'New Character'; app.createCharacter(name,true); document.querySelector('.fixed.inset-0').remove(); })()">➕ Create & Use</button>
+          </div>
+        </div>`;
+      document.getElementById('modalContainer').innerHTML = modal;
+    }
+
+    // ---------- App ----------
+    const app = {
+      state: {
+        characters: {},          // { id: Character }
+        vault: [],               // SHARED array of items
+        currentCharacter: null,
+        isDMMode: false,
+        undoStack: [],
+        session: { active:false, code:null, isDM:false, assignedCharacter:null, ref:null }
+      },
+
+      // lifecycle
+      init(){
+        this.loadState();
+        if (Object.keys(this.state.characters).length===0){
+          // seed 1 char
+          const id = Date.now().toString();
+          this.state.characters[id] = normalizeCharacter({id, name:'New Character', equipment:{}, worldBuffs:{}});
+          this.state.currentCharacter = id;
+        }
+        this.render();
+      },
+
+      // migrate old local storage (per-character vault -> shared vault)
+      loadState(){
+        const saved = localStorage.getItem('dndEquipmentTracker');
+        if (!saved) return;
+        try{
           const loaded = JSON.parse(saved);
+
+          // Migrate characters
           this.state.characters = normalizeAllCharacters(loaded.characters || {});
-          this.state.currentCharacter = loaded.currentCharacter;
+          // Collect any old per-character vaults into shared vault
+          let mergedVault = Array.isArray(loaded.vault) ? loaded.vault : [];
+          Object.values(loaded.characters || {}).forEach(c=>{
+            if (Array.isArray(c?.vault)) mergedVault = mergedVault.concat(c.vault);
+          });
+          this.state.vault = (mergedVault||[]).map(normalizeItem);
+
+          this.state.currentCharacter = loaded.currentCharacter || null;
           this.state.isDMMode = loaded.isDMMode || false;
           this.state.undoStack = loaded.undoStack || [];
-          if (!this.state.currentCharacter || !this.state.characters[this.state.currentCharacter]) {
+          if (!this.state.currentCharacter || !this.state.characters[this.state.currentCharacter]){
             this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
           }
-        } catch (e) {
+        }catch(e){
           console.error('Error loading state, resetting...', e);
           this.state.characters = {};
+          this.state.vault = [];
           this.state.currentCharacter = null;
         }
-      }
-    },
+      },
 
-    saveState() {
-      const toSave = {
-        characters: this.state.characters,
-        currentCharacter: this.state.currentCharacter,
-        isDMMode: this.state.isDMMode,
-        undoStack: this.state.undoStack
-      };
-      localStorage.setItem('dndEquipmentTracker', JSON.stringify(toSave));
-    },
+      saveState(){
+        const toSave = {
+          characters: this.state.characters,
+          vault: this.state.vault,
+          currentCharacter: this.state.currentCharacter,
+          isDMMode: this.state.isDMMode,
+          undoStack: this.state.undoStack
+        };
+        localStorage.setItem('dndEquipmentTracker', JSON.stringify(toSave));
+      },
 
-    // --- session helpers -----------------------------------------------------
-    generateSessionCode() {
-      return Math.random().toString(36).substring(2, 8).toUpperCase();
-    },
+      // --- session helpers & listeners
+      generateSessionCode(){ return Math.random().toString(36).substring(2,8).toUpperCase(); },
 
-    // Attach granular listeners (DM & Player use the same)
-    attachCharacterListeners() {
-      if (!this.state.session.ref) return;
-      const charsRef = this.state.session.ref.child('characters');
+      attachSessionListeners(){
+        if (!this.state.session.ref) return;
+        const sessionRef = this.state.session.ref;
 
-      // clear any existing listeners to avoid dupes if re-attaching
-      charsRef.off();
-
-      // INITIAL LOAD (once), then incremental updates
-      charsRef.once('value', (snap) => {
-        const all = snap.val() || {};
-        this.state.characters = normalizeAllCharacters(all);
-        // Ensure current is valid
-        if (!this.state.currentCharacter || !this.state.characters[this.state.currentCharacter]) {
-          this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
-        }
-        this.render();
-      });
-
-      // CHILD ADDED
-      charsRef.on('child_added', (snap) => {
-        const id = snap.key;
-        const val = snap.val();
-        if (!val) return;
-        this.state.characters[id] = normalizeCharacter({ id, ...val });
-        if (!this.state.currentCharacter) this.state.currentCharacter = id;
-        this.render();
-      });
-
-      // CHILD CHANGED
-      charsRef.on('child_changed', (snap) => {
-        const id = snap.key;
-        const val = snap.val();
-        if (!val) return;
-        this.state.characters[id] = normalizeCharacter({ id, ...val });
-        this.render();
-      });
-
-      // CHILD REMOVED
-      charsRef.on('child_removed', (snap) => {
-        const id = snap.key;
-        delete this.state.characters[id];
-        if (this.state.currentCharacter === id) {
-          this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
-        }
-        this.render();
-      });
-    },
-
-    // --- Host/DM -------------------------------------------------------------
-    showHostModal() {
-      if (!firebaseInitialized) {
-        alert('Firebase not configured. Please add your Firebase config to use multiplayer features.');
-        return;
-      }
-      const modal = `
-        <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
-          <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
-            <h3 class="text-xl font-bold mb-4">Host Session (DM)</h3>
-            <p class="text-sm text-gray-400 mb-4">You will host a session and share a code with players. All your characters and items will be synced in real-time.</p>
-            <div class="flex gap-2">
-              <button onclick="app.hostSession(); this.closest('.fixed').remove();" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded flex-grow">Start Hosting</button>
-              <button onclick="this.closest('.fixed').remove()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
-            </div>
-          </div>
-        </div>`;
-      document.getElementById('modalContainer').innerHTML = modal;
-    },
-
-    hostSession() {
-      const code = this.generateSessionCode();
-      this.state.session.code = code;
-      this.state.session.active = true;
-      this.state.session.isDM = true;
-      this.state.isDMMode = true;
-
-      const sessionRef = firebase.database().ref('sessions/' + code);
-      this.state.session.ref = sessionRef;
-
-      // DM does one initial full set, then ONLY per-character updates (no more set()).
-      sessionRef.set({
-        characters: this.state.characters,
-        timestamp: Date.now()
-      }).then(() => {
-        // attach granular listeners AFTER initial set
-        this.attachCharacterListeners();
-        this.render();
-        alert(`Session started! Share code with players: ${code}`);
-      }).catch(err => {
-        console.error('Failed to host session:', err);
-        alert('Failed to host session. Check Firebase config and rules.');
-      });
-    },
-
-    // --- Player --------------------------------------------------------------
-    showJoinModal() {
-      if (!firebaseInitialized) {
-        alert('Firebase not configured. Please add your Firebase config to use multiplayer features.');
-        return;
-      }
-      const modal = `
-        <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
-          <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
-            <h3 class="text-xl font-bold mb-4">Join Session (Player)</h3>
-            <p class="text-sm text-gray-400 mb-4">Enter the session code provided by your DM.</p>
-            <input type="text" id="joinCode" placeholder="Enter 6-digit code" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4 uppercase text-center text-2xl">
-            <div class="flex gap-2">
-              <button onclick="app.joinSession(document.getElementById('joinCode').value); this.closest('.fixed').remove();" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">Join Session</button>
-              <button onclick="this.closest('.fixed').remove()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
-            </div>
-          </div>
-        </div>`;
-      document.getElementById('modalContainer').innerHTML = modal;
-    },
-
-    joinSession(code) {
-      if (!code || code.length !== 6) { alert('Invalid session code'); return; }
-      code = code.toUpperCase();
-
-      this.state.session.code = code;
-      this.state.session.active = true;
-      this.state.session.isDM = false;
-      this.state.isDMMode = false;
-
-      const sessionRef = firebase.database().ref('sessions/' + code);
-      this.state.session.ref = sessionRef;
-
-      // attach granular listeners (value listener removed)
-      this.attachCharacterListeners();
-
-      // Allow player to push changes to their character only
-      this.setupPlayerSync();
-
-      this.render();
-      alert(`Joined session: ${code}`);
-    },
-
-    setupPlayerSync() {
-      // override saveState to only push player's character
-      const originalSaveState = this.saveState.bind(this);
-      this.saveState = () => {
-        originalSaveState();
-        if (this.state.session.active && !this.state.session.isDM && this.state.session.ref) {
-          const id = this.state.session.assignedCharacter || this.state.currentCharacter;
-          if (id && this.state.characters[id]) {
-            syncCharacterToFirebase(this, id);
+        // CHARACTERS
+        const charsRef = sessionRef.child('characters');
+        charsRef.off();
+        charsRef.once('value', snap => {
+          this.state.characters = normalizeAllCharacters(snap.val() || {});
+          if (!this.state.currentCharacter || !this.state.characters[this.state.currentCharacter]){
+            this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
           }
-        }
-      };
-    },
-
-    disconnectSession() {
-      if (this.state.session.ref) {
-        // turn off ONLY the characters listeners (we used per-path listeners)
-        this.state.session.ref.child('characters').off();
-        // optionally clean up session if DM
-        if (this.state.session.isDM) {
-          if (confirm('Delete session data from server?')) {
-            this.state.session.ref.remove();
+          this.render();
+        });
+        charsRef.on('child_added', snap => {
+          const id = snap.key;
+          const val = snap.val();
+          if (!val) return;
+          this.state.characters[id] = normalizeCharacter({ id, ...val });
+          if (!this.state.currentCharacter) this.state.currentCharacter = id;
+          this.render();
+        });
+        charsRef.on('child_changed', snap => {
+          const id = snap.key;
+          const val = snap.val();
+          if (!val) return;
+          this.state.characters[id] = normalizeCharacter({ id, ...val });
+          this.render();
+        });
+        charsRef.on('child_removed', snap => {
+          const id = snap.key;
+          delete this.state.characters[id];
+          if (this.state.currentCharacter===id){
+            this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
           }
+          this.render();
+        });
+
+        // SHARED VAULT
+        const vaultRef = sessionRef.child('vault');
+        vaultRef.off();
+        vaultRef.once('value', snap => {
+          const v = snap.val();
+          this.state.vault = Array.isArray(v) ? v.map(normalizeItem) : [];
+          this.render();
+        });
+        vaultRef.on('value', snap => {
+          const v = snap.val();
+          this.state.vault = Array.isArray(v) ? v.map(normalizeItem) : [];
+          this.render();
+        });
+      },
+
+      // --- DM host/join
+      showHostModal(){
+        if (!firebaseInitialized){ alert('Firebase not configured.'); return; }
+        const modal = `
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+              <h3 class="text-xl font-bold mb-4">Host Session (DM)</h3>
+              <p class="text-sm text-gray-400 mb-4">Share the code with players. Characters & Vault sync in real-time.</p>
+              <div class="flex gap-2">
+                <button onclick="app.hostSession(); this.closest('.fixed').remove()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded flex-grow">Start Hosting</button>
+                <button onclick="this.closest('.fixed').remove()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+              </div>
+            </div>
+          </div>`;
+        document.getElementById('modalContainer').innerHTML = modal;
+      },
+
+      hostSession(){
+        const code = this.generateSessionCode();
+        this.state.session.code = code;
+        this.state.session.active = true;
+        this.state.session.isDM = true;
+        this.state.isDMMode = true;
+
+        const sessionRef = firebase.database().ref('sessions/'+code);
+        this.state.session.ref = sessionRef;
+
+        sessionRef.set({
+          characters: this.state.characters,
+          vault: this.state.vault,
+          timestamp: Date.now()
+        }).then(()=>{
+          this.attachSessionListeners();
+          this.render();
+          alert(`Session started! Share code: ${code}`);
+        }).catch(err=>{
+          console.error('Failed to host session:', err);
+          alert('Failed to host session. Check Firebase config & rules.');
+        });
+      },
+
+      showJoinModal(){
+        if (!firebaseInitialized){ alert('Firebase not configured.'); return; }
+        const modal = `
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+              <h3 class="text-xl font-bold mb-4">Join Session (Player)</h3>
+              <p class="text-sm text-gray-400 mb-4">Enter the session code from your DM.</p>
+              <input id="joinCode" placeholder="Enter 6-digit code" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4 uppercase text-center text-2xl">
+              <div class="flex gap-2">
+                <button onclick="app.joinSession(document.getElementById('joinCode').value); this.closest('.fixed').remove()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">Join Session</button>
+                <button onclick="this.closest('.fixed').remove()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+              </div>
+            </div>
+          </div>`;
+        document.getElementById('modalContainer').innerHTML = modal;
+      },
+
+      joinSession(code){
+        if (!code || code.length!==6){ alert('Invalid session code'); return; }
+        code = code.toUpperCase();
+        this.state.session.code = code;
+        this.state.session.active = true;
+        this.state.session.isDM = false;
+        this.state.isDMMode = false;
+
+        const sessionRef = firebase.database().ref('sessions/'+code);
+        this.state.session.ref = sessionRef;
+
+        this.attachSessionListeners();
+        this.setupPlayerSync();
+        this.render();
+        alert(`Joined session: ${code}`);
+
+        // If not claimed yet, prompt
+        if (!this.state.session.assignedCharacter){
+          this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
+          this.render();
+          showClaimCharacterModal(this);
         }
-        this.state.session.ref.off();
-      }
+      },
 
-      this.state.session = {
-        active: false,
-        code: null,
-        isDM: false,
-        assignedCharacter: null,
-        ref: null
-      };
+      setupPlayerSync(){
+        const originalSave = this.saveState.bind(this);
+        this.saveState = ()=>{
+          originalSave();
+          if (this.state.session.active && !this.state.session.isDM && this.state.session.ref){
+            const id = this.state.session.assignedCharacter || this.state.currentCharacter;
+            if (id && this.state.characters[id]) syncCharacterToFirebase(this, id);
+          }
+        };
+      },
 
-      this.render();
-      alert('Disconnected from session');
-    },
+      disconnectSession(){
+        if (this.state.session.ref){
+          this.state.session.ref.child('characters').off();
+          this.state.session.ref.child('vault').off();
+          if (this.state.session.isDM){
+            if (confirm('Delete session data from server?')) this.state.session.ref.remove();
+          }
+          this.state.session.ref.off();
+        }
+        this.state.session = { active:false, code:null, isDM:false, assignedCharacter:null, ref:null };
+        this.render();
+        alert('Disconnected from session');
+      },
 
-    // --- Character ops -------------------------------------------------------
-    claimCharacter(charId) {
-      if (!charId) return;
-      this.state.session.assignedCharacter = charId;
-      this.state.currentCharacter = charId;
-      this.saveState();
-      this.render();
-    },
-
-    createCharacter(name, claimForPlayer = false) {
-      const id = Date.now().toString();
-      const newChar = normalizeCharacter({ id, name: name || 'New Character', equipment: {}, vault: [] });
-      this.state.characters[id] = newChar;
-
-      if (this.state.session.active && !this.state.session.isDM) {
-        // Player-created → claim and push ONLY their character
-        this.state.session.assignedCharacter = id;
-        this.state.currentCharacter = id;
+      // Characters
+      claimCharacter(charId){
+        if (!charId) return;
+        this.state.session.assignedCharacter = charId;
+        this.state.currentCharacter = charId;
         this.saveState();
-        syncCharacterToFirebase(this, id);
-      } else {
-        // DM/offline
+        this.render();
+      },
+      createCharacter(name){
+        const id = Date.now().toString();
+        this.state.characters[id] = normalizeCharacter({ id, name: name||'New Character', equipment:{}, worldBuffs:{} });
         this.state.currentCharacter = id;
         this.saveState();
         if (this.state.session.active) syncCharacterToFirebase(this, id);
-      }
-      this.render();
-    },
-
-    cloneCharacter() {
-      if (!this.state.currentCharacter) return;
-      const current = this.state.characters[this.state.currentCharacter];
-      const id = Date.now().toString();
-      this.state.characters[id] = normalizeCharacter({
-        id,
-        name: current.name + ' (Copy)',
-        equipment: JSON.parse(JSON.stringify(current.equipment || {})),
-        vault: Array.isArray(current.vault) ? JSON.parse(JSON.stringify(current.vault)) : []
-      });
-      this.state.currentCharacter = id;
-      this.saveState();
-      if (this.state.session.active) syncCharacterToFirebase(this, id);
-      this.render();
-    },
-
-    deleteCharacter() {
-      if (!this.state.currentCharacter) return;
-      if (Object.keys(this.state.characters).length === 1) {
-        alert('Cannot delete the last character');
-        return;
-      }
-      const deleted = this.state.characters[this.state.currentCharacter];
-      this.state.undoStack.push({ type: 'character', data: deleted });
-      const toRemoveId = this.state.currentCharacter;
-      delete this.state.characters[toRemoveId];
-      this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
-      this.saveState();
-
-      if (this.state.session.active && this.state.session.ref) {
-        // DM can remove any; Player can remove only if they owned it
-        if (this.state.session.isDM || this.state.session.assignedCharacter === toRemoveId) {
-          this.state.session.ref.child('characters/' + toRemoveId).remove().catch(console.error);
+        this.render();
+      },
+      cloneCharacter(){
+        if (!this.state.currentCharacter) return;
+        const current = this.state.characters[this.state.currentCharacter];
+        const id = Date.now().toString();
+        this.state.characters[id] = normalizeCharacter({
+          id,
+          name: current.name + ' (Copy)',
+          equipment: JSON.parse(JSON.stringify(current.equipment || {})),
+          worldBuffs: JSON.parse(JSON.stringify(current.worldBuffs || {}))
+        });
+        this.state.currentCharacter = id;
+        this.saveState();
+        if (this.state.session.active) syncCharacterToFirebase(this, id);
+        this.render();
+      },
+      deleteCharacter(){
+        if (!this.state.currentCharacter) return;
+        if (Object.keys(this.state.characters).length===1){ alert('Cannot delete the last character'); return; }
+        const deleted = this.state.characters[this.state.currentCharacter];
+        this.state.undoStack.push({ type:'character', data:deleted });
+        const toRemoveId = this.state.currentCharacter;
+        delete this.state.characters[toRemoveId];
+        this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
+        this.saveState();
+        if (this.state.session.active && this.state.session.ref){
+          if (this.state.session.isDM || this.state.session.assignedCharacter===toRemoveId){
+            this.state.session.ref.child('characters/'+toRemoveId).remove().catch(console.error);
+          }
         }
-      }
-      this.render();
-    },
+        this.render();
+      },
+      switchCharacter(id){
+        this.state.currentCharacter = id;
+        this.saveState();
+        this.render();
+      },
 
-    switchCharacter(id) {
-      this.state.currentCharacter = id;
-      this.saveState();
-      this.render();
-    },
+      // Items (shared vault; only DM can create/edit/delete)
+      showCreateItemModal(existing=null){
+        const isEdit = !!existing;
+        const item = existing || { name:'', rarity:'Common', stats:[{ name:'', description:'', locked:false }] };
 
-    // --- Item ops ------------------------------------------------------------
-    createItem(itemData) {
-      const char = this.state.characters[this.state.currentCharacter];
-      char.vault.push(itemData);
-      this.saveState();
-      if (this.state.session.active) syncCharacterToFirebase(this, this.state.currentCharacter);
-      this.render();
-    },
+        const statsHtml = (item.stats||[]).map(stat=>`
+          <div class="flex gap-2 items-start stat-row">
+            <input type="text" placeholder="Stat name" value="${stat.name||''}" class="bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name">
+            <textarea placeholder="Description / Value (multiline OK)" class="bg-gray-700 text-white px-3 py-2 rounded w-full stat-desc">${(stat.description||'')}</textarea>
+            <button onclick="this.closest('.stat-row').querySelector('.stat-locked').value = this.closest('.stat-row').querySelector('.stat-locked').value === 'true' ? 'false' : 'true'; this.textContent = this.closest('.stat-row').querySelector('.stat-locked').value === 'true' ? '🔒' : '🔓';" class="bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded">${stat.locked ? '🔒' : '🔓'}</button>
+            <input type="hidden" class="stat-locked" value="${!!stat.locked}">
+            <button onclick="this.closest('.stat-row').remove()" class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded">✕</button>
+          </div>
+        `).join('');
 
-    editItem(itemId) {
-      const char = this.state.characters[this.state.currentCharacter];
-      const item = char.vault.find(i => i.id === itemId);
-      if (!item) return;
-      this.showCreateItemModal(item);
-    },
+        const modal = `
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto" onclick="this.remove()">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-2xl w-full m-4" onclick="event.stopPropagation()">
+              <h3 class="text-xl font-bold mb-4">${isEdit ? 'Edit Item' : 'Create Item'}</h3>
+              <input type="text" id="itemName" placeholder="Item Name" value="${item.name||''}" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+              <select id="itemRarity" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+                ${RARITIES.map(r=>`<option value="${r}" ${r===item.rarity?'selected':''}>${r}</option>`).join('')}
+              </select>
+              <div class="mb-4">
+                <div class="flex justify-between items-center mb-2">
+                  <label class="font-semibold">Stats</label>
+                  <button onclick="document.getElementById('statsContainer').insertAdjacentHTML('beforeend', \`
+                    <div class='flex gap-2 items-start stat-row mt-2'>
+                      <input type='text' placeholder='Stat name' class='bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name'>
+                      <textarea placeholder='Description / Value (multiline OK)' class='bg-gray-700 text-white px-3 py-2 rounded w-full stat-desc'></textarea>
+                      <button onclick='this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value = this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value === \\'true\\' ? \\'false\\' : \\'true\\'; this.textContent = this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value === \\'true\\' ? \\'🔒\\' : \\'🔓\\';' class='bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded'>🔓</button>
+                      <input type='hidden' class='stat-locked' value='false'>
+                      <button onclick='this.closest(\\'.stat-row\\').remove()' class='bg-red-600 hover:bg-red-700 px-3 py-2 rounded'>✕</button>
+                    </div>
+                  \`)" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">+ Add Stat</button>
+                </div>
+                <div id="statsContainer" class="space-y-2">${statsHtml}</div>
+              </div>
+              <div class="flex gap-2">
+                <button onclick="app.saveItem(${isEdit? `'${item.id}'`:'null'}); this.closest('.fixed').remove();" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">${isEdit?'Save':'Create'}</button>
+                <button onclick="this.closest('.fixed').remove()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+              </div>
+            </div>
+          </div>`;
+        document.getElementById('modalContainer').innerHTML = modal;
+      },
 
-    updateItem(itemId, itemData) {
-      const char = this.state.characters[this.state.currentCharacter];
-      const index = char.vault.findIndex(i => i.id === itemId);
-      if (index !== -1) {
-        char.vault[index] = itemData;
+      saveItem(itemId){
+        if (!canManageItems(this)){ alert('Only the DM can manage items.'); return; }
+        const name = document.getElementById('itemName').value;
+        const rarity = document.getElementById('itemRarity').value;
+        const rows = document.querySelectorAll('.stat-row');
+        const stats = [];
+        rows.forEach(row=>{
+          const n = row.querySelector('.stat-name')?.value || '';
+          const d = row.querySelector('.stat-desc')?.value || '';
+          const l = row.querySelector('.stat-locked')?.value === 'true';
+          if (n || d) stats.push(normalizeStat({ name:n, description:d, locked:l }));
+        });
+        const itemData = normalizeItem({ id: itemId || Date.now().toString(), name: name||'Unnamed Item', rarity, stats });
+        if (itemId){
+          const idx = this.state.vault.findIndex(i=>i.id===itemId);
+          if (idx>-1) this.state.vault[idx] = itemData;
+        } else {
+          this.state.vault.push(itemData);
+        }
+        this.saveState();
+        syncVaultToFirebase(this);
+        this.render();
+      },
+
+      editItem(itemId){
+        if (!canManageItems(this)){ alert('Only the DM can edit items.'); return; }
+        const item = this.state.vault.find(i=>i.id===itemId);
+        if (!item) return;
+        this.showCreateItemModal(item);
+      },
+      deleteItem(itemId){
+        if (!canManageItems(this)){ alert('Only the DM can delete items.'); return; }
+        const item = this.state.vault.find(i=>i.id===itemId);
+        if (item) this.state.undoStack.push({ type:'item', data:item });
+        this.state.vault = this.state.vault.filter(i=>i.id!==itemId);
+        this.saveState();
+        syncVaultToFirebase(this);
+        this.render();
+      },
+      duplicateItem(itemId){
+        if (!canManageItems(this)){ alert('Only the DM can duplicate items.'); return; }
+        const item = this.state.vault.find(i=>i.id===itemId);
+        if (!item) return;
+        const copy = JSON.parse(JSON.stringify(item));
+        copy.id = Date.now().toString();
+        copy.name = item.name + ' (Copy)';
+        this.state.vault.push(copy);
+        this.saveState();
+        syncVaultToFirebase(this);
+        this.render();
+      },
+
+      // Equip / Unequip (players only for their own char; world buffs DM only)
+      equipItem(itemId, slot){
+        const char = this.state.characters[this.state.currentCharacter];
+        if (!char) return;
+
+        const isWorldBuff = WORLD_BUFF_SLOTS.includes(slot);
+        if (isWorldBuff){
+          if (!canEditWorldBuffs(this)){ alert('Only the DM can modify World Buffs.'); return; }
+          char.worldBuffs[slot] = itemId;
+        } else {
+          if (!canEditCurrent(this)){ alert('You can only equip your own character.'); return; }
+          char.equipment[slot] = itemId;
+        }
+
         this.saveState();
         if (this.state.session.active) syncCharacterToFirebase(this, this.state.currentCharacter);
         this.render();
-      }
-    },
+      },
 
-    duplicateItem(itemId) {
-      const char = this.state.characters[this.state.currentCharacter];
-      const item = char.vault.find(i => i.id === itemId);
-      if (!item) return;
-      const newItem = JSON.parse(JSON.stringify(item));
-      newItem.id = Date.now().toString();
-      newItem.name = item.name + ' (Copy)';
-      char.vault.push(newItem);
-      this.saveState();
-      if (this.state.session.active) syncCharacterToFirebase(this, this.state.currentCharacter);
-      this.render();
-    },
-
-    deleteItem(itemId) {
-      const char = this.state.characters[this.state.currentCharacter];
-      const item = char.vault.find(i => i.id === itemId);
-      if (item) this.state.undoStack.push({ type: 'item', data: item });
-      char.vault = char.vault.filter(i => i.id !== itemId);
-      this.saveState();
-      if (this.state.session.active) syncCharacterToFirebase(this, this.state.currentCharacter);
-      this.render();
-    },
-
-    equipItem(itemId, slot) {
-      const char = this.state.characters[this.state.currentCharacter];
-      if (!char) return;
-      if (!Array.isArray(char.vault)) char.vault = [];
-      if (!char.equipment || typeof char.equipment !== 'object') char.equipment = {};
-
-      const item = char.vault.find(i => i.id === itemId);
-      if (!item) return;
-
-      if (char.equipment[slot]) {
-        const currentItem = char.vault.find(i => i.id === char.equipment[slot]);
-        if (currentItem) currentItem.equipped = false;
-      }
-
-      char.equipment[slot] = itemId;
-      item.equipped = true;
-
-      this.saveState();
-      if (this.state.session.active) syncCharacterToFirebase(this, this.state.currentCharacter);
-      this.render();
-    },
-
-    unequipItem(slot) {
-      const char = this.state.characters[this.state.currentCharacter];
-      if (!char || !char.equipment) return;
-
-      const itemId = char.equipment[slot];
-      if (!itemId) return;
-
-      const item = Array.isArray(char.vault) ? char.vault.find(i => i.id === itemId) : null;
-      if (item) item.equipped = false;
-
-      delete char.equipment[slot];
-
-      this.saveState();
-      if (this.state.session.active) syncCharacterToFirebase(this, this.state.currentCharacter);
-      this.render();
-    },
-
-    undo() {
-      if (this.state.undoStack.length === 0) return;
-      const action = this.state.undoStack.pop();
-      if (action.type === 'character') {
-        this.state.characters[action.data.id] = action.data;
-        this.state.currentCharacter = action.data.id;
-      } else if (action.type === 'item') {
+      unequipItem(slot){
         const char = this.state.characters[this.state.currentCharacter];
-        char.vault.push(action.data);
-      }
-      this.saveState();
-      if (this.state.session.active) syncCharacterToFirebase(this, this.state.currentCharacter);
-      this.render();
-    },
+        if (!char) return;
 
-    // --- UI helpers ----------------------------------------------------------
-    filterVault(searchTerm) {
-      const items = document.querySelectorAll('#vaultItems > div');
-      items.forEach(item => {
-        const name = item.querySelector('.item-name')?.textContent.toLowerCase() || '';
-        item.style.display = name.includes(searchTerm.toLowerCase()) ? 'block' : 'none';
-      });
-    },
+        const isWorldBuff = WORLD_BUFF_SLOTS.includes(slot);
+        if (isWorldBuff){
+          if (!canEditWorldBuffs(this)){ alert('Only the DM can modify World Buffs.'); return; }
+          delete char.worldBuffs[slot];
+        } else {
+          if (!canEditCurrent(this)){ alert('You can only unequip your own character.'); return; }
+          delete char.equipment[slot];
+        }
 
-    calculateTotalStats() {
-      const char = this.state.characters[this.state.currentCharacter];
-      if (!char) return { stats: {}, hasHidden: false };
+        this.saveState();
+        if (this.state.session.active) syncCharacterToFirebase(this, this.state.currentCharacter);
+        this.render();
+      },
 
-      const equipment = char.equipment || {};
-      const vault = Array.isArray(char.vault) ? char.vault : [];
+      // Undo (only local stack for now)
+      undo(){
+        if (this.state.undoStack.length===0) return;
+        const action = this.state.undoStack.pop();
+        if (action.type==='character'){
+          this.state.characters[action.data.id] = action.data;
+          this.state.currentCharacter = action.data.id;
+          if (this.state.session.active) syncCharacterToFirebase(this, this.state.currentCharacter);
+        } else if (action.type==='item'){
+          this.state.vault.push(action.data);
+          syncVaultToFirebase(this);
+        }
+        this.saveState();
+        this.render();
+      },
 
-      const totals = {};
-      let hasHidden = false;
-
-      Object.values(equipment).forEach(itemId => {
-        const item = vault.find(i => i.id === itemId);
-        if (!item || !Array.isArray(item.stats)) return;
-
-        item.stats.forEach(stat => {
-          if (stat.locked && !this.state.session.isDM) {
-            hasHidden = true;
-            return;
-          }
-          if (!totals[stat.name]) totals[stat.name] = 0;
-          totals[stat.name] += parseFloat(stat.value) || 0;
-        });
-      });
-
-      return { stats: totals, hasHidden };
-    },
-
-    // --- Modals (create/edit) -----------------------------------------------
-    showCreateCharacterModal() {
-      const modal = `
-        <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
-          <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
-            <h3 class="text-xl font-bold mb-4">Create Character</h3>
-            <input type="text" id="charName" placeholder="Character Name" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
-            <div class="flex gap-2">
-              <button onclick="app.createCharacter(document.getElementById('charName').value); this.closest('.fixed').remove();" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">Create</button>
-              <button onclick="this.closest('.fixed').remove()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
-            </div>
-          </div>
-        </div>`;
-      document.getElementById('modalContainer').innerHTML = modal;
-    },
-
-    showCreateItemModal(existingItem = null) {
-      const isEdit = !!existingItem;
-      const item = existingItem || { name: '', rarity: 'Common', stats: [{ name: '', value: '', locked: false }] };
-
-      const statsHtml = item.stats.map(stat => `
-        <div class="flex gap-2 items-center stat-row">
-          <input type="text" placeholder="Stat name" value="${stat.name}" class="bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name">
-          <input type="text" placeholder="Value" value="${stat.value}" class="bg-gray-700 text-white px-3 py-2 rounded w-24 stat-value">
-          <button onclick="this.closest('.stat-row').querySelector('.stat-locked').value = this.closest('.stat-row').querySelector('.stat-locked').value === 'true' ? 'false' : 'true'; this.textContent = this.closest('.stat-row').querySelector('.stat-locked').value === 'true' ? '🔒' : '🔓';" class="bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded">${stat.locked ? '🔒' : '🔓'}</button>
-          <input type="hidden" class="stat-locked" value="${stat.locked}">
-          <button onclick="this.closest('.stat-row').remove()" class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded">✕</button>
-        </div>
-      `).join('');
-
-      const modal = `
-        <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto" onclick="this.remove()">
-          <div class="bg-gray-800 rounded-lg p-6 max-w-2xl w-full m-4" onclick="event.stopPropagation()">
-            <h3 class="text-xl font-bold mb-4">${isEdit ? 'Edit Item' : 'Create Item'}</h3>
-            <input type="text" id="itemName" placeholder="Item Name" value="${item.name}" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
-            <select id="itemRarity" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
-              ${RARITIES.map(r => `<option value="${r}" ${r === item.rarity ? 'selected' : ''}>${r}</option>`).join('')}
-            </select>
-            <div class="mb-4">
-              <div class="flex justify-between items-center mb-2">
-                <label class="font-semibold">Stats</label>
-                <button onclick="document.getElementById('statsContainer').insertAdjacentHTML('beforeend', \`
-                  <div class='flex gap-2 items-center stat-row mt-2'>
-                    <input type='text' placeholder='Stat name' class='bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name'>
-                    <input type='text' placeholder='Value' class='bg-gray-700 text-white px-3 py-2 rounded w-24 stat-value'>
-                    <button onclick='this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value = this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value === \\'true\\' ? \\'false\\' : \\'true\\'; this.textContent = this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value === \\'true\\' ? \\'🔒\\' : \\'🔓\\';' class='bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded'>🔓</button>
-                    <input type='hidden' class='stat-locked' value='false'>
-                    <button onclick='this.closest(\\'.stat-row\\').remove()' class='bg-red-600 hover:bg-red-700 px-3 py-2 rounded'>✕</button>
-                  </div>
-                \`)" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">+ Add Stat</button>
+      // Export/Import
+      showExportModal(){
+        const modal = `
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+              <h3 class="text-xl font-bold mb-4">Export Backup</h3>
+              <p class="text-sm text-gray-400 mb-4">Save your data as a token for backup:</p>
+              <div class="space-y-2">
+                <button onclick="app.exportToken(); this.closest('.fixed').remove();" class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded text-left">
+                  <div class="font-bold">💾 Master Backup</div>
+                  <div class="text-xs text-gray-300">All characters + shared vault</div>
+                </button>
               </div>
-              <div id="statsContainer" class="space-y-2">${statsHtml}</div>
+              <button onclick="this.closest('.fixed').remove()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded w-full mt-4">Cancel</button>
             </div>
-            <div class="flex gap-2">
-              <button onclick="app.saveItem(${isEdit ? `'${item.id}'` : 'null'}); this.closest('.fixed').remove();" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">${isEdit ? 'Save' : 'Create'}</button>
-              <button onclick="this.closest('.fixed').remove()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+          </div>`;
+        document.getElementById('modalContainer').innerHTML = modal;
+      },
+      exportToken(){
+        const data = { type:'full-backup', characters:this.state.characters, vault:this.state.vault };
+        const token = btoa(JSON.stringify(data));
+        navigator.clipboard.writeText(token).then(()=> alert('Backup token copied to clipboard!'));
+      },
+
+      showImportModal(){
+        const modal = `
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+              <h3 class="text-xl font-bold mb-4">Import Backup</h3>
+              <p class="text-sm text-gray-400 mb-2">Paste your master backup token:</p>
+              <textarea id="importToken" placeholder="Paste token here..." class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4 h-32"></textarea>
+              <div class="flex gap-2">
+                <button onclick="app.importToken(document.getElementById('importToken').value); this.closest('.fixed').remove()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">Import</button>
+                <button onclick="this.closest('.fixed').remove()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+              </div>
             </div>
-          </div>
-        </div>
-      `;
-      document.getElementById('modalContainer').innerHTML = modal;
-    },
+          </div>`;
+        document.getElementById('modalContainer').innerHTML = modal;
+      },
+      importToken(token){
+        try{
+          const data = JSON.parse(atob(token));
+          if (data.type==='full-backup'){
+            if (confirm('This will replace ALL current data. Continue?')){
+              this.state.characters = normalizeAllCharacters(data.characters||{});
+              this.state.vault = Array.isArray(data.vault) ? data.vault.map(normalizeItem) : [];
+              this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
+              this.saveState();
+              if (this.state.session.active){
+                if (this.state.session.isDM){
+                  // DM pushes both
+                  this.state.session.ref.child('characters').set(this.state.characters);
+                  this.state.session.ref.child('vault').set(this.state.vault);
+                }
+              }
+              this.render();
+              alert('Backup restored!');
+            }
+          }
+        }catch(e){
+          console.error(e);
+          alert('Invalid token!');
+        }
+      },
 
-    saveItem(itemId) {
-      const name = document.getElementById('itemName').value;
-      const rarity = document.getElementById('itemRarity').value;
-      const statRows = document.querySelectorAll('.stat-row');
+      // UI helpers
+      filterVault(q){
+        const items = document.querySelectorAll('#vaultItems > div');
+        items.forEach(el=>{
+          const name = el.querySelector('.item-name')?.textContent.toLowerCase() || '';
+          el.style.display = name.includes((q||'').toLowerCase()) ? 'block' : 'none';
+        });
+      },
 
-      const stats = [];
-      statRows.forEach(row => {
-        const statName = row.querySelector('.stat-name').value;
-        const statValue = row.querySelector('.stat-value').value;
-        const statLocked = row.querySelector('.stat-locked').value === 'true';
-        if (statName || statValue) stats.push(normalizeStat({ name: statName, value: statValue, locked: statLocked }));
-      });
+      // Stats: sum numeric descriptions by stat name, across equipment + world buffs; ignore locked for players
+      calculateTotalStats(){
+        const char = this.state.characters[this.state.currentCharacter];
+        if (!char) return { stats:{}, hasHidden:false };
+        const totals = {};
+        let hasHidden = false;
+        const addItemStats = (itemId)=>{
+          const item = this.state.vault.find(i=>i.id===itemId);
+          if (!item || !Array.isArray(item.stats)) return;
+          item.stats.forEach(stat=>{
+            if (stat.locked && !this.state.session.isDM){ hasHidden = true; return; }
+            const key = (stat.name||'').trim();
+            if (!key) return;
+            const n = parseFloat(String(stat.description).trim());
+            if (!isNaN(n)){
+              totals[key] = (totals[key]||0) + n;
+            }
+          });
+        };
+        // equipment
+        Object.values(char.equipment||{}).forEach(addItemStats);
+        // world buffs
+        Object.values(char.worldBuffs||{}).forEach(addItemStats);
 
-      const itemData = normalizeItem({
-        id: itemId || Date.now().toString(),
-        name: name || 'Unnamed Item',
-        rarity,
-        stats,
-        equipped: false
-      });
+        return { stats: totals, hasHidden };
+      },
 
-      if (itemId) this.updateItem(itemId, itemData);
-      else this.createItem(itemData);
-    },
+      // ---------- Renderers ----------
+      render(){
+        this.renderCharacterSelect();
+        this.renderWorldBuffs();
+        this.renderEquipmentSlots();
+        this.renderVault();
+        this.renderTotalStats();
+        this.renderSessionStatus();
+        this.renderUndoButton();
+        this.renderPermissions();
+      },
 
-    // --- Rendering -----------------------------------------------------------
-    render() {
-      this.renderCharacterSelect();
-      this.renderEquipmentSlots();
-      this.renderVault();
-      this.renderTotalStats();
-      this.renderSessionStatus();
-      this.renderUndoButton();
-      this.renderPermissions();
-    },
+      renderCharacterSelect(){
+        const select = document.getElementById('characterSelect');
+        const isPlayer = this.state.session.active && !this.state.session.isDM;
 
-    renderCharacterSelect() {
-      const select = document.getElementById('characterSelect');
-      const isPlayer = this.state.session.active && !this.state.session.isDM;
+        if (isPlayer && this.state.session.assignedCharacter){
+          const mine = this.state.session.assignedCharacter;
+          select.innerHTML = `<option value="${mine}" selected>${this.state.characters[mine]?.name || 'My Character'}</option>` +
+            Object.values(this.state.characters).filter(c=>c.id!==mine)
+              .map(c=>`<option disabled value="${c.id}">👁 ${c.name}</option>`).join('');
+          return;
+        }
+        // DM / offline
+        select.innerHTML = Object.values(this.state.characters)
+          .map(c=>`<option value="${c.id}" ${c.id===this.state.currentCharacter?'selected':''}>${c.name}</option>`).join('');
+      },
 
-      if (isPlayer && this.state.session.assignedCharacter) {
-        const mine = this.state.session.assignedCharacter;
-        select.innerHTML = `<option value="${mine}" selected>${this.state.characters[mine]?.name || 'My Character'}</option>`;
-        return;
-      }
+      renderWorldBuffs(){
+        const char = this.state.characters[this.state.currentCharacter] || {};
+        const container = document.getElementById('worldBuffs');
+        const buffs = char.worldBuffs || {};
+        const dmCanEdit = canEditWorldBuffs(this);
 
-      select.innerHTML = Object.values(this.state.characters)
-        .map(char => `<option value="${char.id}" ${char.id === this.state.currentCharacter ? 'selected' : ''}>${char.name}</option>`)
-        .join('');
-    },
+        container.innerHTML = WORLD_BUFF_SLOTS.map(slot=>{
+          const itemId = buffs[slot];
+          const item = itemId ? this.state.vault.find(i=>i.id===itemId) : null;
 
-    renderEquipmentSlots() {
-      const char = this.state.characters[this.state.currentCharacter] || {};
-      const container = document.getElementById('equipmentSlots');
+          if (item){
+            const visibleStats = (item.stats||[]).filter(s=> this.state.session.isDM || !s.locked);
+            const hasHidden = (item.stats||[]).some(s=>s.locked) && !this.state.session.isDM;
+            return `
+              <div class="bg-gray-700 rounded-lg p-4 slot-filled rarity-${(item.rarity||'Common').toLowerCase().replace(' ','')}">
+                <div class="flex justify-between items-start mb-2">
+                  <div>
+                    <div class="font-bold">${slot}</div>
+                    <div class="text-sm text-blue-300">${item.name}</div>
+                    <div class="text-xs text-gray-400">${item.rarity}</div>
+                  </div>
+                  ${dmCanEdit ? `<button onclick="app.unequipItem('${slot}')" class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-sm">Unequip</button>`:''}
+                </div>
+                ${visibleStats.length? `
+                  <div class="text-sm mt-2 space-y-1">
+                    ${visibleStats.map(s=>`<div><span class="font-semibold">${s.name}:</span> <span class="text-green-400 whitespace-pre-wrap">${s.description}</span></div>`).join('')}
+                    ${hasHidden? '<div class="text-xs text-yellow-400 mt-1">🔒 Contains hidden stats</div>':''}
+                  </div>` : ''
+                }
+              </div>`;
+          } else {
+            return `
+              <div class="bg-gray-700 rounded-lg p-4 slot-empty">
+                <div class="font-bold text-gray-400">${slot}</div>
+                <div class="text-sm text-gray-500 mb-2">Empty</div>
+                ${dmCanEdit ? `
+                  <select onchange="if(this.value){ app.equipItem(this.value, '${slot}'); this.value=''; }" class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
+                    <option value="">Equip from vault...</option>
+                    ${this.state.vault.map(v=>`<option value="${v.id}">${v.name}</option>`).join('')}
+                  </select>` : ''
+                }
+              </div>`;
+          }
+        }).join('');
+      },
 
-      const equipment = char.equipment && typeof char.equipment === 'object' ? char.equipment : {};
-      const vault = Array.isArray(char.vault) ? char.vault : [];
+      renderEquipmentSlots(){
+        const char = this.state.characters[this.state.currentCharacter] || {};
+        const container = document.getElementById('equipmentSlots');
+        const equip = char.equipment || {};
+        const canEdit = canEditCurrent(this);
 
-      container.innerHTML = SLOTS.map(slot => {
-        const itemId = equipment[slot];
-        const item = itemId ? vault.find(i => i.id === itemId) : null;
+        container.innerHTML = SLOTS.map(slot=>{
+          const itemId = equip[slot];
+          const item = itemId ? this.state.vault.find(i=>i.id===itemId) : null;
+          if (item){
+            const visibleStats = (item.stats||[]).filter(s=> this.state.session.isDM || !s.locked);
+            const hasHidden = (item.stats||[]).some(s=>s.locked) && !this.state.session.isDM;
+            return `
+              <div class="bg-gray-700 rounded-lg p-4 slot-filled rarity-${(item.rarity||'Common').toLowerCase().replace(' ','')}">
+                <div class="flex justify-between items-start mb-2">
+                  <div>
+                    <div class="font-bold">${slot}</div>
+                    <div class="text-sm text-blue-300">${item.name}</div>
+                    <div class="text-xs text-gray-400">${item.rarity}</div>
+                  </div>
+                  ${canEdit ? `<button onclick="app.unequipItem('${slot}')" class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-sm">Unequip</button>`:''}
+                </div>
+                ${visibleStats.length? `
+                  <div class="text-sm mt-2 space-y-1">
+                    ${visibleStats.map(s=>`<div><span class="font-semibold">${s.name}:</span> <span class="text-green-400 whitespace-pre-wrap">${s.description}</span></div>`).join('')}
+                    ${hasHidden? '<div class="text-xs text-yellow-400 mt-1">🔒 Contains hidden stats</div>':''}
+                  </div>` : ''
+                }
+              </div>`;
+          } else {
+            return `
+              <div class="bg-gray-700 rounded-lg p-4 slot-empty">
+                <div class="font-bold text-gray-400">${slot}</div>
+                <div class="text-sm text-gray-500 mb-2">Empty</div>
+                ${canEdit ? `
+                  <select onchange="if(this.value){ app.equipItem(this.value, '${slot}'); this.value=''; }" class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
+                    <option value="">Equip from vault...</option>
+                    ${this.state.vault.map(v=>`<option value="${v.id}">${v.name}</option>`).join('')}
+                  </select>` : ''
+                }
+              </div>`;
+          }
+        }).join('');
+      },
 
-        if (item) {
-          const visibleStats = Array.isArray(item.stats) ? item.stats.filter(s => this.state.session.isDM || !s.locked) : [];
-          const hasHiddenStats = Array.isArray(item.stats) ? item.stats.some(s => s.locked) && !this.state.session.isDM : false;
+      renderVault(){
+        const container = document.getElementById('vaultItems');
+        if (!this.state.vault.length){
+          container.innerHTML = '<div class="text-gray-500 text-center py-4">No items in vault</div>';
+          return;
+        }
+        const dm = canManageItems(this);
+
+        container.innerHTML = this.state.vault.map(item=>{
+          const visibleStats = (item.stats||[]).filter(s=> this.state.session.isDM || !s.locked);
+          const hasHidden = (item.stats||[]).some(s=>s.locked) && !this.state.session.isDM;
+
+          // Equip options: players can equip to their own character equipment only; DM can equip anywhere (equipment + world buffs)
+          const canEquipHere = this.state.session.isDM || !this.state.session.active || canEditCurrent(this);
+
+          const equipOptions = `
+            <option value="">Equip to...</option>
+            ${SLOTS.map(s=>`<option value="${s}">${s}</option>`).join('')}
+            ${this.state.session.isDM ? WORLD_BUFF_SLOTS.map(s=>`<option value="${s}">${s}</option>`).join('') : ''}
+          `;
 
           return `
-            <div class="bg-gray-700 rounded-lg p-4 slot-filled rarity-${item.rarity?.toLowerCase().replace(' ', '') || 'common'}">
+            <div class="bg-gray-700 rounded-lg p-3 rarity-${(item.rarity||'Common').toLowerCase().replace(' ','')}">
               <div class="flex justify-between items-start mb-2">
-                <div>
-                  <div class="font-bold">${slot}</div>
-                  <div class="text-sm text-blue-300">${item.name}</div>
+                <div class="flex-grow">
+                  <div class="font-bold item-name">${item.name}</div>
                   <div class="text-xs text-gray-400">${item.rarity}</div>
                 </div>
-                <button onclick="app.unequipItem('${slot}')" class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-sm">Unequip</button>
+                ${dm ? `
+                  <div class="flex gap-1">
+                    <button onclick="app.editItem('${item.id}')" class="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs">Edit</button>
+                    <button onclick="app.duplicateItem('${item.id}')" class="bg-yellow-600 hover:bg-yellow-700 px-2 py-1 rounded text-xs">Copy</button>
+                    <button onclick="app.deleteItem('${item.id}')" class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs">Del</button>
+                  </div>` : ''
+                }
               </div>
-              ${visibleStats.length > 0 ? `
-                <div class="text-sm mt-2 space-y-1">
-                  ${visibleStats.map(s => `<div class="flex justify-between"><span>${s.name}:</span><span class="text-green-400">${s.value}</span></div>`).join('')}
-                  ${hasHiddenStats ? '<div class="text-xs text-yellow-400 mt-1">🔒 Contains hidden stats</div>' : ''}
-                </div>` : ''}
+              ${visibleStats.length? `
+                <div class="text-xs space-y-1 mb-2">
+                  ${visibleStats.map(s=>`<div><span class="font-semibold">${s.name}:</span> <span class="text-green-400 whitespace-pre-wrap">${s.description}</span></div>`).join('')}
+                  ${hasHidden? '<div class="text-xs text-yellow-400 mt-1">🔒 Contains hidden stats</div>':''}
+                </div>` : ''
+              }
+              ${canEquipHere ? `
+                <select onchange="if(this.value){ app.equipItem('${item.id}', this.value); this.value=''; }" class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
+                  ${equipOptions}
+                </select>` : ''
+              }
             </div>`;
-        } else {
-          return `
-            <div class="bg-gray-700 rounded-lg p-4 slot-empty">
-              <div class="font-bold text-gray-400">${slot}</div>
-              <div class="text-sm text-gray-500">Empty</div>
-            </div>`;
+        }).join('');
+      },
+
+      renderTotalStats(){
+        const { stats, hasHidden } = this.calculateTotalStats();
+        const container = document.getElementById('totalStats');
+        const entries = Object.entries(stats);
+        if (!entries.length){
+          container.innerHTML = '<div class="col-span-full text-gray-500 text-center py-4">No equipment stats</div>';
+          return;
         }
-      }).join('');
-    },
+        container.innerHTML = entries.map(([name,value])=>`
+          <div class="bg-gray-700 rounded p-3">
+            <div class="text-sm text-gray-400">${name}</div>
+            <div class="text-xl font-bold text-green-400">${value}</div>
+          </div>
+        `).join('') + (hasHidden? `
+          <div class="col-span-full bg-yellow-900 bg-opacity-30 rounded p-3 text-yellow-400 text-sm text-center">🔒 Some stats are hidden (Player Mode)</div>`: '');
+      },
 
-    renderVault() {
-      const char = this.state.characters[this.state.currentCharacter] || {};
-      const container = document.getElementById('vaultItems');
-
-      const vault = Array.isArray(char.vault) ? char.vault : [];
-      const unequippedItems = vault.filter(item => !item.equipped);
-
-      if (unequippedItems.length === 0) {
-        container.innerHTML = '<div class="text-gray-500 text-center py-4">No items in vault</div>';
-        return;
-      }
-
-      const canEdit = this.state.session.isDM || !this.state.session.active;
-
-      container.innerHTML = unequippedItems.map(item => {
-        const visibleStats = Array.isArray(item.stats) ? item.stats.filter(s => this.state.session.isDM || !s.locked) : [];
-        const hasHiddenStats = Array.isArray(item.stats) ? item.stats.some(s => s.locked) && !this.state.session.isDM : false;
-
-        return `
-          <div class="bg-gray-700 rounded-lg p-3 rarity-${item.rarity?.toLowerCase().replace(' ', '') || 'common'}">
-            <div class="flex justify-between items-start mb-2">
-              <div class="flex-grow">
-                <div class="font-bold item-name">${item.name}</div>
-                <div class="text-xs text-gray-400">${item.rarity}</div>
-              </div>
-              ${canEdit ? `
-                <div class="flex gap-1">
-                  <button onclick="app.editItem('${item.id}')" class="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs">Edit</button>
-                  <button onclick="app.duplicateItem('${item.id}')" class="bg-yellow-600 hover:bg-yellow-700 px-2 py-1 rounded text-xs">Copy</button>
-                  <button onclick="app.deleteItem('${item.id}')" class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs">Del</button>
-                </div>` : ''}
-            </div>
-            ${visibleStats.length > 0 ? `
-              <div class="text-xs space-y-1 mb-2">
-                ${visibleStats.map(s => `<div class="flex justify-between"><span>${s.name}:</span><span class="text-green-400">${s.value}</span></div>`).join('')}
-                ${hasHiddenStats ? '<div class="text-xs text-yellow-400 mt-1">🔒 Contains hidden stats</div>' : ''}
-              </div>` : ''}
-            <select onchange="if(this.value) { app.equipItem('${item.id}', this.value); this.value = ''; }" class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
-              <option value="">Equip to...</option>
-              ${SLOTS.map(slot => `<option value="${slot}">${slot}</option>`).join('')}
-            </select>
-          </div>`;
-      }).join('');
-    },
-
-    renderTotalStats() {
-      const { stats, hasHidden } = this.calculateTotalStats();
-      const container = document.getElementById('totalStats');
-
-      const entries = Object.entries(stats);
-      if (entries.length === 0) {
-        container.innerHTML = '<div class="col-span-full text-gray-500 text-center py-4">No equipment stats</div>';
-        return;
-      }
-
-      container.innerHTML = entries.map(([name, value]) => `
-        <div class="bg-gray-700 rounded p-3">
-          <div class="text-sm text-gray-400">${name}</div>
-          <div class="text-xl font-bold text-green-400">${value}</div>
-        </div>
-      `).join('') + (hasHidden ? `
-        <div class="col-span-full bg-yellow-900 bg-opacity-30 rounded p-3 text-yellow-400 text-sm text-center">
-          🔒 Some stats are hidden (Player Mode)
-        </div>` : '');
-    },
-
-    renderSessionStatus() {
-      const statusEl = document.getElementById('sessionStatus');
-      const infoEl = document.getElementById('activeSessionInfo');
-      const codeEl = document.getElementById('sessionCode');
-
-      if (this.state.session.active) {
-        statusEl.innerHTML = `
-          <span class="w-2 h-2 bg-green-500 rounded-full pulse-online"></span>
-          <span class="text-sm font-bold text-green-400">${this.state.session.isDM ? 'Hosting' : 'Connected'}</span>
-        `;
-        infoEl.classList.remove('hidden');
-        codeEl.textContent = this.state.session.code;
-      } else {
-        statusEl.innerHTML = '<span class="text-sm text-gray-400">Offline</span>';
-        infoEl.classList.add('hidden');
-      }
-    },
-
-    renderUndoButton() {
-      const btn = document.getElementById('undoBtn');
-      if (this.state.undoStack.length > 0) btn.classList.remove('hidden');
-      else btn.classList.add('hidden');
-    },
-
-    renderPermissions() {
-      const isPlayer = this.state.session.active && !this.state.session.isDM;
-      const canEdit = canEditCurrent(this);
-
-      const select = document.getElementById('characterSelect');
-      if (select) {
-        if (isPlayer && this.state.session.assignedCharacter) {
-          const mine = this.state.session.assignedCharacter;
-          select.innerHTML = `<option value="${mine}">${this.state.characters[mine]?.name || 'My Character'}</option>`;
-          select.disabled = true;
-          select.classList.add('opacity-50', 'cursor-not-allowed');
+      renderSessionStatus(){
+        const statusEl = document.getElementById('sessionStatus');
+        const infoEl = document.getElementById('activeSessionInfo');
+        const codeEl = document.getElementById('sessionCode');
+        if (this.state.session.active){
+          statusEl.innerHTML = `<span class="w-2 h-2 bg-green-500 rounded-full pulse-online"></span><span class="text-sm font-bold text-green-400">${this.state.session.isDM?'Hosting':'Connected'}</span>`;
+          infoEl.classList.remove('hidden');
+          codeEl.textContent = this.state.session.code;
         } else {
-          select.disabled = false;
-          select.classList.remove('opacity-50', 'cursor-not-allowed');
+          statusEl.innerHTML = '<span class="text-sm text-gray-400">Offline</span>';
+          infoEl.classList.add('hidden');
         }
+      },
+
+      renderUndoButton(){
+        const btn = document.getElementById('undoBtn');
+        if (this.state.undoStack.length>0) btn.classList.remove('hidden');
+        else btn.classList.add('hidden');
+      },
+
+      renderPermissions(){
+        const isPlayer = this.state.session.active && !this.state.session.isDM;
+        const canEdit = canEditCurrent(this);
+
+        const select = document.getElementById('characterSelect');
+        if (select){
+          if (isPlayer && this.state.session.assignedCharacter){
+            const mine = this.state.session.assignedCharacter;
+            // already rendered with 👁 for others
+            select.disabled = false; // allow peeking via disabled options in markup
+          } else {
+            select.disabled = false;
+          }
+        }
+
+        // Only DM can manage items
+        const dmOnly = ['addItemBtn'];
+        dmOnly.forEach(id=>{
+          const el = document.getElementById(id);
+          if (!el) return;
+          if (!canManageItems(this)){ el.disabled = true; el.classList.add('opacity-50','cursor-not-allowed'); }
+          else { el.disabled = false; el.classList.remove('opacity-50','cursor-not-allowed'); }
+        });
+
+        // Character CRUD (allow DM; players not)
+        ['newCharBtn','cloneCharBtn','deleteCharBtn'].forEach(id=>{
+          const el = document.getElementById(id);
+          if (!el) return;
+          if (!this.state.session.isDM && this.state.session.active){
+            el.disabled = true; el.classList.add('opacity-50','cursor-not-allowed');
+          } else {
+            el.disabled = false; el.classList.remove('opacity-50','cursor-not-allowed');
+          }
+        });
       }
+    };
 
-      const disableForPlayer = ['newCharBtn', 'cloneCharBtn', 'deleteCharBtn', 'addItemBtn'];
-      disableForPlayer.forEach(btnId => {
-        const btn = document.getElementById(btnId);
-        if (!btn) return;
-        if (!canEdit) {
-          btn.disabled = true;
-          btn.classList.add('opacity-50', 'cursor-not-allowed');
-        } else {
-          btn.disabled = false;
-          btn.classList.remove('opacity-50', 'cursor-not-allowed');
-        }
-      });
-    }
-  };
-
-  // Boot
-  window.onload = () => app.init();
-</script>
+    window.onload = ()=> app.init();
+  </script>
 </body>
 </html>
