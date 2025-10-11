@@ -418,34 +418,69 @@
                 <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
                     <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
                         <h3 class="text-xl font-bold mb-4">Export Token</h3>
-                        <div class="flex gap-2">
-                            <button onclick="app.exportToken(true); this.closest('.fixed').remove();" 
-                                class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">DM Token</button>
-                            <button onclick="app.exportToken(false); this.closest('.fixed').remove();" 
-                                class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded flex-grow">Player Token</button>
+                        <p class="text-sm text-gray-400 mb-4">Choose export type:</p>
+                        <div class="space-y-2">
+                            <button onclick="app.exportToken('dm-single'); this.closest('.fixed').remove();" 
+                                class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-left">
+                                <div class="font-bold">DM Character Token</div>
+                                <div class="text-xs text-gray-300">Current character with all locked stats</div>
+                            </button>
+                            <button onclick="app.exportToken('player'); this.closest('.fixed').remove();" 
+                                class="w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-left">
+                                <div class="font-bold">Player Character Token</div>
+                                <div class="text-xs text-gray-300">Current character without locked stats</div>
+                            </button>
+                            <button onclick="app.exportToken('dm-all'); this.closest('.fixed').remove();" 
+                                class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded text-left">
+                                <div class="font-bold">DM Full Backup</div>
+                                <div class="text-xs text-gray-300">All characters with all data</div>
+                            </button>
                         </div>
                         <button onclick="this.closest('.fixed').remove()" 
-                            class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded w-full mt-2">Cancel</button>
+                            class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded w-full mt-4">Cancel</button>
                     </div>
                 </div>
             `;
             document.getElementById('modalContainer').innerHTML = modal;
         },
 
-        exportToken(isDM) {
-            const char = this.state.characters[this.state.currentCharacter];
-            let data = JSON.parse(JSON.stringify(char));
+        exportToken(type) {
+            let data;
+            let message;
 
-            if (!isDM) {
-                data.vault = data.vault.map(item => ({
+            if (type === 'dm-all') {
+                // Export everything
+                data = {
+                    type: 'full-backup',
+                    characters: this.state.characters
+                };
+                message = 'Full backup token copied to clipboard!';
+            } else if (type === 'dm-single') {
+                // Export single character with all data
+                const char = this.state.characters[this.state.currentCharacter];
+                data = {
+                    type: 'character',
+                    character: JSON.parse(JSON.stringify(char))
+                };
+                message = 'DM character token copied to clipboard!';
+            } else if (type === 'player') {
+                // Export single character, strip locked stats
+                const char = this.state.characters[this.state.currentCharacter];
+                const cleanChar = JSON.parse(JSON.stringify(char));
+                cleanChar.vault = cleanChar.vault.map(item => ({
                     ...item,
                     stats: item.stats.filter(stat => !stat.locked)
                 }));
+                data = {
+                    type: 'character',
+                    character: cleanChar
+                };
+                message = 'Player character token copied to clipboard!';
             }
 
             const token = btoa(JSON.stringify(data));
             navigator.clipboard.writeText(token).then(() => {
-                alert(`${isDM ? 'DM' : 'Player'} token copied to clipboard!`);
+                alert(message);
             });
         },
 
@@ -454,6 +489,12 @@
                 <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
                     <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
                         <h3 class="text-xl font-bold mb-4">Import Token</h3>
+                        <p class="text-sm text-gray-400 mb-2">Paste any token type:</p>
+                        <ul class="text-xs text-gray-500 mb-4 list-disc list-inside">
+                            <li>DM Character Token - Imports with all stats</li>
+                            <li>Player Character Token - Merges with existing locked stats</li>
+                            <li>DM Full Backup - Restores all characters</li>
+                        </ul>
                         <textarea id="importToken" placeholder="Paste token here..." 
                             class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4 h-32"></textarea>
                         <div class="flex gap-2">
@@ -471,16 +512,87 @@
         importToken(token) {
             try {
                 const data = JSON.parse(atob(token));
-                const id = Date.now().toString();
-                data.id = id;
-                this.state.characters[id] = data;
-                this.state.currentCharacter = id;
-                this.saveState();
-                this.render();
-                alert('Character imported successfully!');
+
+                if (data.type === 'full-backup') {
+                    // Restore all characters
+                    if (confirm('This will replace ALL current characters. Continue?')) {
+                        this.state.characters = data.characters;
+                        this.state.currentCharacter = Object.keys(data.characters)[0];
+                        this.saveState();
+                        this.render();
+                        alert('Full backup restored successfully!');
+                    }
+                } else if (data.type === 'character') {
+                    // Import single character
+                    const importedChar = data.character;
+                    
+                    // Check if this character already exists (by name for merging)
+                    const existingChar = Object.values(this.state.characters).find(c => c.name === importedChar.name);
+                    
+                    if (existingChar && this.state.isDMMode) {
+                        // DM Mode: Ask if they want to merge (preserve locked stats)
+                        if (confirm(`Character "${importedChar.name}" already exists. Merge updates while preserving hidden stats?`)) {
+                            this.mergeCharacter(existingChar, importedChar);
+                            alert('Character merged successfully! Hidden stats preserved.');
+                        } else {
+                            // Import as new character with different name
+                            const id = Date.now().toString();
+                            importedChar.id = id;
+                            importedChar.name = importedChar.name + ' (Imported)';
+                            this.state.characters[id] = importedChar;
+                            this.state.currentCharacter = id;
+                            this.saveState();
+                            this.render();
+                            alert('Character imported as new!');
+                        }
+                    } else {
+                        // Just import as new character
+                        const id = Date.now().toString();
+                        importedChar.id = id;
+                        this.state.characters[id] = importedChar;
+                        this.state.currentCharacter = id;
+                        this.saveState();
+                        this.render();
+                        alert('Character imported successfully!');
+                    }
+                }
             } catch (e) {
                 alert('Invalid token!');
+                console.error(e);
             }
+        },
+
+        mergeCharacter(existingChar, importedChar) {
+            // Create a map of existing items with their locked stats
+            const existingItemsMap = new Map();
+            existingChar.vault.forEach(item => {
+                existingItemsMap.set(item.name, item);
+            });
+
+            // Update imported items to restore locked stats if they exist
+            importedChar.vault.forEach(importedItem => {
+                const existingItem = existingItemsMap.get(importedItem.name);
+                if (existingItem) {
+                    // Merge stats: keep locked stats from existing, update unlocked from imported
+                    const lockedStats = existingItem.stats.filter(s => s.locked);
+                    const unlockedStats = importedItem.stats.filter(s => !s.locked);
+                    
+                    // Combine them, but avoid duplicates by name
+                    const statMap = new Map();
+                    lockedStats.forEach(s => statMap.set(s.name, s));
+                    unlockedStats.forEach(s => statMap.set(s.name, s));
+                    
+                    importedItem.stats = Array.from(statMap.values());
+                }
+            });
+
+            // Replace the existing character with merged data
+            existingChar.equipment = importedChar.equipment;
+            existingChar.vault = importedChar.vault;
+            
+            this.state.currentCharacter = existingChar.id;
+            this.saveState();
+            this.render();
         },
 
         render() {
