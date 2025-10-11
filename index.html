@@ -220,8 +220,89 @@ function normalizeAllCharacters(characters) {
     return normalized;
 }
 
+// --- PERMISSIONS + SYNC HELPERS ---------------------------------
+function canEditCurrent(app) {
+  // DM can edit anything. Player can edit only their assigned character.
+  if (app.state.session.isDM) return true;
+  if (!app.state.session.active) return true; // offline
+  return app.state.session.assignedCharacter &&
+         app.state.currentCharacter === app.state.session.assignedCharacter;
+}
+
+function syncCharacterToFirebase(app, charId) {
+  if (!app.state.session.active || !app.state.session.ref || !charId) return;
+  const char = app.state.characters[charId];
+  if (!char) return;
+  const path = 'characters/' + charId;
+
+  if (app.state.session.isDM) {
+    // DM updates just this character
+    app.state.session.ref.child(path).update(char).catch(console.error);
+  } else {
+    // Player may update only their assigned character
+    if (app.state.session.assignedCharacter === charId) {
+      app.state.session.ref.child(path).update(char).catch(console.error);
+    }
+  }
+}
+
+// --- CLAIM/CREATE MODAL ------------------------------------------
+function showClaimCharacterModal(appInstance) {
+  const chars = Object.values(appInstance.state.characters || {});
+  const options = chars.map(c => `
+    <option value="${c.id}">${c.name || 'Unnamed Character'}</option>
+  `).join('');
+
+  const modal = `
+    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+      <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+        <h3 class="text-xl font-bold mb-4">Claim or Create Character</h3>
+
+        ${chars.length ? `
+          <label class="text-sm text-gray-300 mb-1 block">Pick an existing one:</label>
+          <select id="claimSelect" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+            ${options}
+          </select>
+          <button class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded mb-3"
+                  onclick="(function(){
+                    const id = document.getElementById('claimSelect').value;
+                    app.claimCharacter(id);
+                    document.querySelector('.fixed.inset-0').remove();
+                  })()">
+            ✅ Claim Selected
+          </button>
+        ` : `
+          <div class="text-sm text-gray-400 mb-4">No characters yet. Create one to get started.</div>
+        `}
+
+        <div class="border-t border-gray-700 my-3"></div>
+
+        <label class="text-sm text-gray-300 mb-1 block">...or create new:</label>
+        <input id="newCharName" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-3" placeholder="New character name">
+        <button class="w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded"
+                onclick="(function(){
+                  const name = document.getElementById('newCharName').value || 'New Character';
+                  app.createCharacter(name, /*claimForPlayer=*/true);
+                  document.querySelector('.fixed.inset-0').remove();
+                })()">
+          ➕ Create & Use
+        </button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalContainer').innerHTML = modal;
+}
         
         const app = {
+
+    claimCharacter(charId) {
+  if (!charId) return;
+  this.state.session.assignedCharacter = charId;
+  this.state.currentCharacter = charId;
+  this.saveState();
+  this.render();
+},
+
         
             state: {
                 characters: {},
@@ -280,9 +361,9 @@ loadState() {
                 localStorage.setItem('dndEquipmentTracker', JSON.stringify(toSave));
 
                 // Sync to Firebase if in active session
-                if (this.state.session.active && this.state.session.isDM && this.state.session.ref) {
-                    this.syncToFirebase();
-                }
+              //  if (this.state.session.active && this.state.session.isDM && this.state.session.ref) {
+                  //  this.syncToFirebase();
+               // }
             },
 
             syncToFirebase() {
@@ -329,31 +410,31 @@ loadState() {
                 `;
                 document.getElementById('modalContainer').innerHTML = modal;
             },
-
 hostSession() {
-    const code = this.generateSessionCode();
-    this.state.session.code = code;
-    this.state.session.active = true;
-    this.state.session.isDM = true;
-    this.state.isDMMode = true;
-    this.state.characters = normalizeAllCharacters(this.state.characters);
+  const code = this.generateSessionCode();
+  this.state.session.code = code;
+  this.state.session.active = true;
+  this.state.session.isDM = true;
+  this.state.isDMMode = true;
+  this.state.characters = normalizeAllCharacters(this.state.characters);
 
-    const sessionRef = firebase.database().ref('sessions/' + code);
-    this.state.session.ref = sessionRef;
+  const sessionRef = firebase.database().ref('sessions/' + code);
+  this.state.session.ref = sessionRef;
 
-    // Initial sync
-    sessionRef.set({
-        characters: this.state.characters,
-        timestamp: Date.now()
-    }).then(() => {
-        console.log('Session hosted successfully');
-        this.render();
-        alert(`Session started! Share code with players: ${code}`);
-    }).catch(err => {
-        console.error('Failed to host session:', err);
-        alert('Failed to host session. Check Firebase config and rules.');
-    });
+  // Initial write (full object once)
+  sessionRef.set({
+    characters: this.state.characters,
+    timestamp: Date.now()
+  }).then(() => {
+    console.log('Session hosted successfully');
+    this.render();
+    alert(`Session started! Share code with players: ${code}`);
+  }).catch(err => {
+    console.error('Failed to host session:', err);
+    alert('Failed to host session. Check Firebase config and rules.');
+  });
 },
+
 
             showJoinModal() {
                 if (!firebaseInitialized) {
@@ -385,47 +466,58 @@ hostSession() {
             },
 
 joinSession(code) {
-    if (!code || code.length !== 6) {
-        alert('Invalid session code');
+  if (!code || code.length !== 6) {
+    alert('Invalid session code');
+    return;
+  }
+
+  code = code.toUpperCase();
+  this.state.session.code = code;
+  this.state.session.active = true;
+  this.state.session.isDM = false;
+  this.state.isDMMode = false;
+
+  const sessionRef = firebase.database().ref('sessions/' + code);
+  this.state.session.ref = sessionRef;
+
+  // Listen to DM updates
+  sessionRef.on('value', (snapshot) => {
+    const data = snapshot.val();
+    if (data && data.characters) {
+      this.state.characters = normalizeAllCharacters(data.characters);
+
+      // If player hasn't claimed a character yet, open claim/create modal
+      if (!this.state.session.assignedCharacter) {
+        // pick first as current just for preview
+        this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
+        this.render();
+        showClaimCharacterModal(this);
         return;
+      }
+
+      // If they have one, keep them on that; if it doesn't exist anymore, force a re-claim
+      if (!this.state.characters[this.state.session.assignedCharacter]) {
+        this.state.session.assignedCharacter = null;
+        this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
+        this.render();
+        showClaimCharacterModal(this);
+        return;
+      }
+
+      this.state.currentCharacter = this.state.session.assignedCharacter;
+      this.render();
+    } else {
+      console.warn("No character data found in session");
     }
+  });
 
-    code = code.toUpperCase();
-    this.state.session.code = code;
-    this.state.session.active = true;
-    this.state.session.isDM = false;
-    this.state.isDMMode = false;
+  // Allow player to push changes to their character
+  this.setupPlayerSync();
 
-    const sessionRef = firebase.database().ref('sessions/' + code);
-    this.state.session.ref = sessionRef;
-
-    // ✅ LISTEN for DM updates
-    sessionRef.on('value', (snapshot) => {
-        const data = snapshot.val();
-
-        if (data && data.characters) {
-            console.log("Received characters from DM:", data.characters);
-
-            // ✅ DM IS MASTER → overwrite local state completely
-            this.state.characters = normalizeAllCharacters(data.characters);
-
-            // ✅ Auto-select first character if current missing
-            if (!this.state.currentCharacter || !this.state.characters[this.state.currentCharacter]) {
-                this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
-            }
-
-            this.render();
-        } else {
-            console.warn("No character data found in session");
-        }
-    });
-
-    // ✅ Allow player to send back *only their character* later
-    this.setupPlayerSync();
-
-    this.render();
-    alert(`Joined session: ${code}`);
+  this.render();
+  alert(`Joined session: ${code}`);
 },
+
 
             setupPlayerSync() {
                 // When player makes changes, send them back to DM
@@ -472,47 +564,72 @@ joinSession(code) {
                 alert('Disconnected from session');
             },
 
-            createCharacter(name) {
-                const id = Date.now().toString();
-                this.state.characters[id] = {
-                    id,
-                    name,
-                    equipment: {},
-                    vault: []
-                };
-                this.state.currentCharacter = id;
-                this.saveState();
-                this.render();
-            },
+createCharacter(name, claimForPlayer = false) {
+  const id = Date.now().toString();
+  const newChar = normalizeCharacter({
+    id,
+    name: name || 'New Character',
+    equipment: {},
+    vault: []
+  });
 
-            cloneCharacter() {
-                if (!this.state.currentCharacter) return;
-                const current = this.state.characters[this.state.currentCharacter];
-                const id = Date.now().toString();
-                this.state.characters[id] = {
-                    id,
-                    name: current.name + ' (Copy)',
-                    equipment: JSON.parse(JSON.stringify(current.equipment)),
-                    vault: JSON.parse(JSON.stringify(current.vault))
-                };
-                this.state.currentCharacter = id;
-                this.saveState();
-                this.render();
-            },
+  this.state.characters[id] = newChar;
 
-            deleteCharacter() {
-                if (!this.state.currentCharacter) return;
-                if (Object.keys(this.state.characters).length === 1) {
-                    alert('Cannot delete the last character');
-                    return;
-                }
-                const deleted = this.state.characters[this.state.currentCharacter];
-                this.state.undoStack.push({ type: 'character', data: deleted });
-                delete this.state.characters[this.state.currentCharacter];
-                this.state.currentCharacter = Object.keys(this.state.characters)[0];
-                this.saveState();
-                this.render();
-            },
+  // If player created it, claim it and sync only their char
+  if (this.state.session.active && !this.state.session.isDM) {
+    this.state.session.assignedCharacter = id;
+    this.state.currentCharacter = id;
+    this.saveState();
+    syncCharacterToFirebase(this, id);
+  } else {
+    // DM or offline: just select it and (if DM in session) push per-character
+    this.state.currentCharacter = id;
+    this.saveState();
+    syncCharacterToFirebase(this, id);
+  }
+
+  this.render();
+},
+
+cloneCharacter() {
+  if (!this.state.currentCharacter) return;
+  const current = this.state.characters[this.state.currentCharacter];
+  const id = Date.now().toString();
+  this.state.characters[id] = normalizeCharacter({
+    id,
+    name: current.name + ' (Copy)',
+    equipment: JSON.parse(JSON.stringify(current.equipment || {})),
+    vault: Array.isArray(current.vault) ? JSON.parse(JSON.stringify(current.vault)) : []
+  });
+  this.state.currentCharacter = id;
+  this.saveState();
+  syncCharacterToFirebase(this, id);
+  this.render();
+},
+
+
+deleteCharacter() {
+  if (!this.state.currentCharacter) return;
+  if (Object.keys(this.state.characters).length === 1) {
+    alert('Cannot delete the last character');
+    return;
+  }
+  const deleted = this.state.characters[this.state.currentCharacter];
+  this.state.undoStack.push({ type: 'character', data: deleted });
+  const toRemoveId = this.state.currentCharacter;
+  delete this.state.characters[toRemoveId];
+  this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
+  this.saveState();
+
+  // Remove on server if DM; if player and it was theirs, remove path.
+  if (this.state.session.active && this.state.session.ref) {
+    if (this.state.session.isDM || this.state.session.assignedCharacter === toRemoveId) {
+      this.state.session.ref.child('characters/' + toRemoveId).remove().catch(console.error);
+    }
+  }
+
+  this.render();
+},
 
             switchCharacter(id) {
                 this.state.currentCharacter = id;
@@ -520,12 +637,13 @@ joinSession(code) {
                 this.render();
             },
 
-            createItem(itemData) {
-                const char = this.state.characters[this.state.currentCharacter];
-                char.vault.push(itemData);
-                this.saveState();
-                this.render();
-            },
+createItem(itemData) {
+  const char = this.state.characters[this.state.currentCharacter];
+  char.vault.push(itemData);
+  this.saveState();
+  syncCharacterToFirebase(this, this.state.currentCharacter);
+  this.render();
+},
 
             editItem(itemId) {
                 const char = this.state.characters[this.state.currentCharacter];
@@ -533,16 +651,16 @@ joinSession(code) {
                 if (!item) return;
                 this.showCreateItemModal(item);
             },
-
-            updateItem(itemId, itemData) {
-                const char = this.state.characters[this.state.currentCharacter];
-                const index = char.vault.findIndex(i => i.id === itemId);
-                if (index !== -1) {
-                    char.vault[index] = itemData;
-                    this.saveState();
-                    this.render();
-                }
-            },
+updateItem(itemId, itemData) {
+  const char = this.state.characters[this.state.currentCharacter];
+  const index = char.vault.findIndex(i => i.id === itemId);
+  if (index !== -1) {
+    char.vault[index] = itemData;
+    this.saveState();
+    syncCharacterToFirebase(this, this.state.currentCharacter);
+    this.render();
+  }
+},
 
             duplicateItem(itemId) {
                 const char = this.state.characters[this.state.currentCharacter];
@@ -555,65 +673,54 @@ joinSession(code) {
                 this.saveState();
                 this.render();
             },
+deleteItem(itemId) {
+  const char = this.state.characters[this.state.currentCharacter];
+  const item = char.vault.find(i => i.id === itemId);
+  if (item) this.state.undoStack.push({ type: 'item', data: item });
+  char.vault = char.vault.filter(i => i.id !== itemId);
+  this.saveState();
+  syncCharacterToFirebase(this, this.state.currentCharacter);
+  this.render();
+},
 
-            deleteItem(itemId) {
-                const char = this.state.characters[this.state.currentCharacter];
-                const item = char.vault.find(i => i.id === itemId);
-                if (item) {
-                    this.state.undoStack.push({ type: 'item', data: item });
-                }
-                char.vault = char.vault.filter(i => i.id !== itemId);
-                this.saveState();
-                this.render();
-            },
 
 equipItem(itemId, slot) {
-    const char = this.state.characters[this.state.currentCharacter];
-    if (!char) return;
+  const char = this.state.characters[this.state.currentCharacter];
+  if (!char) return;
+  if (!Array.isArray(char.vault)) char.vault = [];
+  if (!char.equipment || typeof char.equipment !== 'object') char.equipment = {};
 
-    // ✅ Ensure vault and equipment exist
-    if (!Array.isArray(char.vault)) char.vault = [];
-    if (!char.equipment || typeof char.equipment !== 'object') char.equipment = {};
+  const item = char.vault.find(i => i.id === itemId);
+  if (!item) return;
 
-    const item = char.vault.find(i => i.id === itemId);
-    if (!item) return;
+  if (char.equipment[slot]) {
+    const currentItem = char.vault.find(i => i.id === char.equipment[slot]);
+    if (currentItem) currentItem.equipped = false;
+  }
 
-    // ✅ If something already equipped in that slot, unequip it first
-    if (char.equipment[slot]) {
-        const currentItem = char.vault.find(i => i.id === char.equipment[slot]);
-        if (currentItem) {
-            currentItem.equipped = false;
-        }
-    }
+  char.equipment[slot] = itemId;
+  item.equipped = true;
 
-    char.equipment[slot] = itemId;
-    item.equipped = true;
-
-    this.saveState();
-    this.render();
+  this.saveState();
+  syncCharacterToFirebase(this, this.state.currentCharacter);
+  this.render();
 },
 
 unequipItem(slot) {
-    const char = this.state.characters[this.state.currentCharacter];
-    if (!char) return;
+  const char = this.state.characters[this.state.currentCharacter];
+  if (!char || !char.equipment) return;
 
-    if (!char.equipment || typeof char.equipment !== 'object') return;
+  const itemId = char.equipment[slot];
+  if (!itemId) return;
 
-    const itemId = char.equipment[slot];
-    if (!itemId) return;
+  const item = Array.isArray(char.vault) ? char.vault.find(i => i.id === itemId) : null;
+  if (item) item.equipped = false;
 
-    const item = Array.isArray(char.vault)
-        ? char.vault.find(i => i.id === itemId)
-        : null;
+  delete char.equipment[slot];
 
-    if (item) {
-        item.equipped = false;
-    }
-
-    delete char.equipment[slot];
-
-    this.saveState();
-    this.render();
+  this.saveState();
+  syncCharacterToFirebase(this, this.state.currentCharacter);
+  this.render();
 },
 
             undo() {
@@ -867,12 +974,22 @@ importToken(token) {
                 this.renderPermissions();
             },
 
-            renderCharacterSelect() {
-                const select = document.getElementById('characterSelect');
-                select.innerHTML = Object.values(this.state.characters)
-                    .map(char => `<option value="${char.id}" ${char.id === this.state.currentCharacter ? 'selected' : ''}>${char.name}</option>`)
-                    .join('');
-            },
+renderCharacterSelect() {
+  const select = document.getElementById('characterSelect');
+  const isPlayer = this.state.session.active && !this.state.session.isDM;
+
+  // Player with claimed char: render only theirs (renderPermissions will also lock it)
+  if (isPlayer && this.state.session.assignedCharacter) {
+    const mine = this.state.session.assignedCharacter;
+    select.innerHTML = `<option value="${mine}" selected>${this.state.characters[mine]?.name || 'My Character'}</option>`;
+    return;
+  }
+
+  // DM / offline / player not yet claimed
+  select.innerHTML = Object.values(this.state.characters)
+    .map(char => `<option value="${char.id}" ${char.id === this.state.currentCharacter ? 'selected' : ''}>${char.name}</option>`)
+    .join('');
+},
 
 renderEquipmentSlots() {
     const char = this.state.characters[this.state.currentCharacter] || {};
@@ -1039,25 +1156,36 @@ renderVault() {
                 }
             },
 
-            renderPermissions() {
-                // Disable certain buttons if player in session
-                const isPlayer = this.state.session.active && !this.state.session.isDM;
-                
-                const disableForPlayer = ['newCharBtn', 'cloneCharBtn', 'deleteCharBtn', 'addItemBtn'];
-                disableForPlayer.forEach(btnId => {
-                    const btn = document.getElementById(btnId);
-                    if (btn) {
-                        if (isPlayer) {
-                            btn.disabled = true;
-                            btn.classList.add('opacity-50', 'cursor-not-allowed');
-                        } else {
-                            btn.disabled = false;
-                            btn.classList.remove('opacity-50', 'cursor-not-allowed');
-                        }
-                    }
-                });
-            }
-        };
+renderPermissions() {
+  const isPlayer = this.state.session.active && !this.state.session.isDM;
+  const canEdit = canEditCurrent(this);
+
+  const select = document.getElementById('characterSelect');
+  if (select) {
+    if (isPlayer && this.state.session.assignedCharacter) {
+      const mine = this.state.session.assignedCharacter;
+      select.innerHTML = `<option value="${mine}">${this.state.characters[mine]?.name || 'My Character'}</option>`;
+      select.disabled = true;
+      select.classList.add('opacity-50', 'cursor-not-allowed');
+    } else {
+      select.disabled = false;
+      select.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+  }
+
+  const disableForPlayer = ['newCharBtn', 'cloneCharBtn', 'deleteCharBtn', 'addItemBtn'];
+  disableForPlayer.forEach(btnId => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    if (!canEdit) {
+      btn.disabled = true;
+      btn.classList.add('opacity-50', 'cursor-not-allowed');
+    } else {
+      btn.disabled = false;
+      btn.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+  });
+},
 
         window.onload = () => app.init();
     </script>
