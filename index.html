@@ -1,11 +1,12 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>D&D 5e Equipment Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
     <style>
         .rarity-common { border-left: 4px solid #9ca3af; }
         .rarity-uncommon { border-left: 4px solid #10b981; }
@@ -15,736 +16,916 @@
         .rarity-artifact { border-left: 4px solid #ef4444; }
         .slot-empty { border: 2px dashed #d1d5db; }
         .slot-filled { border: 2px solid #3b82f6; }
+        .pulse-online { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
     <div id="app" class="container mx-auto p-4 max-w-7xl">
         <!-- Header -->
-        <div class="flex justify-between items-center mb-6">
-            <h1 class="text-3xl font-bold text-blue-400">D&D 5e Equipment Tracker</h1>
-            <div class="flex gap-4 items-center">
-                <button onclick="app.toggleDMMode()" class="px-4 py-2 rounded font-semibold" id="dmToggle">
-                    Player Mode
+        <div class="bg-gray-800 rounded-lg p-4 mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h1 class="text-3xl font-bold text-blue-400">D&D 5e Equipment Tracker</h1>
+                <div id="sessionStatus" class="flex items-center gap-2">
+                    <span class="text-sm text-gray-400">Offline</span>
+                </div>
+            </div>
+            
+            <!-- Session Controls -->
+            <div id="sessionControls" class="flex gap-4 items-center flex-wrap">
+                <button onclick="app.showHostModal()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded">
+                    🎲 Host Session (DM)
                 </button>
-                <button onclick="app.showExportModal()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded">
-                    Export Token
+                <button onclick="app.showJoinModal()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">
+                    👥 Join Session (Player)
                 </button>
-                <button onclick="app.showImportModal()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded">
-                    Import Token
+                <button onclick="app.showExportModal()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded">
+                    💾 Export Backup
+                </button>
+                <button onclick="app.showImportModal()" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded">
+                    📥 Import Backup
                 </button>
             </div>
-        </div>
 
-    <!-- Character Selection -->
-    <div class="bg-gray-800 rounded-lg p-4 mb-6">
-        <div class="flex gap-4 items-center flex-wrap">
-            <select id="characterSelect" onchange="app.switchCharacter(this.value)" class="bg-gray-700 text-white px-4 py-2 rounded flex-grow">
-            </select>
-            <button onclick="app.showCreateCharacterModal()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">
-                New Character
-            </button>
-            <button onclick="app.cloneCharacter()" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded">
-                Clone
-            </button>
-            <button onclick="app.deleteCharacter()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded">
-                Delete
-            </button>
-            <button onclick="app.undo()" id="undoBtn" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded hidden">
-                Undo Delete
-            </button>
-        </div>
-    </div>
-
-    <!-- Main Content -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Equipment Slots -->
-        <div class="lg:col-span-2">
-            <div class="bg-gray-800 rounded-lg p-6">
-                <h2 class="text-2xl font-bold mb-4 text-blue-300">Equipment Slots</h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="equipmentSlots"></div>
-            </div>
-
-            <!-- Total Stats -->
-            <div class="bg-gray-800 rounded-lg p-6 mt-6">
-                <h2 class="text-2xl font-bold mb-4 text-blue-300">Total Stats</h2>
-                <div id="totalStats" class="grid grid-cols-2 md:grid-cols-3 gap-3"></div>
-            </div>
-        </div>
-
-        <!-- Vault -->
-        <div>
-            <div class="bg-gray-800 rounded-lg p-6">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-2xl font-bold text-blue-300">Item Vault</h2>
-                    <button onclick="app.showCreateItemModal()" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">
-                        + Add Item
+            <!-- Active Session Info -->
+            <div id="activeSessionInfo" class="hidden mt-4 p-4 bg-gray-700 rounded-lg">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <div class="text-sm text-gray-400">Session Code</div>
+                        <div class="text-2xl font-bold text-green-400" id="sessionCode">------</div>
+                    </div>
+                    <button onclick="app.disconnectSession()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded">
+                        Disconnect
                     </button>
                 </div>
-                <input type="text" id="vaultSearch" oninput="app.filterVault(this.value)" 
-                    placeholder="Search items..." class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
-                <div id="vaultItems" class="space-y-2 max-h-96 overflow-y-auto"></div>
+            </div>
+        </div>
+
+        <!-- Character Selection -->
+        <div class="bg-gray-800 rounded-lg p-4 mb-6">
+            <div class="flex gap-4 items-center flex-wrap">
+                <select id="characterSelect" onchange="app.switchCharacter(this.value)" class="bg-gray-700 text-white px-4 py-2 rounded flex-grow">
+                </select>
+                <button onclick="app.showCreateCharacterModal()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded" id="newCharBtn">
+                    New Character
+                </button>
+                <button onclick="app.cloneCharacter()" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded" id="cloneCharBtn">
+                    Clone
+                </button>
+                <button onclick="app.deleteCharacter()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded" id="deleteCharBtn">
+                    Delete
+                </button>
+                <button onclick="app.undo()" id="undoBtn" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded hidden">
+                    Undo Delete
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Equipment Slots -->
+            <div class="lg:col-span-2">
+                <div class="bg-gray-800 rounded-lg p-6">
+                    <h2 class="text-2xl font-bold mb-4 text-blue-300">Equipment Slots</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="equipmentSlots"></div>
+                </div>
+
+                <!-- Total Stats -->
+                <div class="bg-gray-800 rounded-lg p-6 mt-6">
+                    <h2 class="text-2xl font-bold mb-4 text-blue-300">Total Stats</h2>
+                    <div id="totalStats" class="grid grid-cols-2 md:grid-cols-3 gap-3"></div>
+                </div>
+            </div>
+
+            <!-- Vault -->
+            <div>
+                <div class="bg-gray-800 rounded-lg p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-bold text-blue-300">Item Vault</h2>
+                        <button onclick="app.showCreateItemModal()" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm" id="addItemBtn">
+                            + Add Item
+                        </button>
+                    </div>
+                    <input type="text" id="vaultSearch" oninput="app.filterVault(this.value)" 
+                        placeholder="Search items..." class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+                    <div id="vaultItems" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                </div>
             </div>
         </div>
     </div>
-</div>
 
-<!-- Modals -->
-<div id="modalContainer"></div>
+    <!-- Modals -->
+    <div id="modalContainer"></div>
 
-<script>
-    const SLOTS = ['Head', 'Amulet', 'Cloak', 'Armor', 'Belt', 'Gloves', 'Ring 1', 'Ring 2', 
-                   'Main Hand', 'Off Hand', 'Shield', 'Boots', 'Misc 1', 'Misc 2'];
-    const RARITIES = ['Common', 'Uncommon', 'Rare', 'Very Rare', 'Legendary', 'Artifact'];
+    <script>
+        const SLOTS = ['Head', 'Amulet', 'Cloak', 'Armor', 'Belt', 'Gloves', 'Ring 1', 'Ring 2', 
+                       'Main Hand', 'Off Hand', 'Shield', 'Boots', 'Misc 1', 'Misc 2'];
+        const RARITIES = ['Common', 'Uncommon', 'Rare', 'Very Rare', 'Legendary', 'Artifact'];
 
-    const app = {
-        state: {
-            characters: {},
-            currentCharacter: null,
-            isDMMode: false,
-            undoStack: []
-        },
+        // Firebase Configuration - Replace with your Firebase project config
+const firebaseConfig = {
 
-        init() {
-            this.loadState();
-            if (Object.keys(this.state.characters).length === 0) {
-                this.createCharacter('New Character');
-            }
-            this.render();
-        },
+  apiKey: "AIzaSyBuVrJKcWVpxqSSVAzeVSnFAggRmlcPHao",
 
-        loadState() {
-            const saved = localStorage.getItem('dndEquipmentTracker');
-            if (saved) {
-                this.state = JSON.parse(saved);
-            }
-        },
+  authDomain: "dndequipmenttool.firebaseapp.com",
 
-        saveState() {
-            localStorage.setItem('dndEquipmentTracker', JSON.stringify(this.state));
-        },
+  projectId: "dndequipmenttool",
 
-        createCharacter(name) {
-            const id = Date.now().toString();
-            this.state.characters[id] = {
-                id,
-                name,
-                equipment: {},
-                vault: []
-            };
-            this.state.currentCharacter = id;
-            this.saveState();
-            this.render();
-        },
+  storageBucket: "dndequipmenttool.firebasestorage.app",
 
-        cloneCharacter() {
-            if (!this.state.currentCharacter) return;
-            const current = this.state.characters[this.state.currentCharacter];
-            const id = Date.now().toString();
-            this.state.characters[id] = {
-                id,
-                name: current.name + ' (Copy)',
-                equipment: JSON.parse(JSON.stringify(current.equipment)),
-                vault: JSON.parse(JSON.stringify(current.vault))
-            };
-            this.state.currentCharacter = id;
-            this.saveState();
-            this.render();
-        },
+  messagingSenderId: "237918823599",
 
-        deleteCharacter() {
-            if (!this.state.currentCharacter) return;
-            if (Object.keys(this.state.characters).length === 1) {
-                alert('Cannot delete the last character');
-                return;
-            }
-            const deleted = this.state.characters[this.state.currentCharacter];
-            this.state.undoStack.push({ type: 'character', data: deleted });
-            delete this.state.characters[this.state.currentCharacter];
-            this.state.currentCharacter = Object.keys(this.state.characters)[0];
-            this.saveState();
-            this.render();
-        },
+  appId: "1:237918823599:web:d4da5bd6148532a544605a"
 
-        switchCharacter(id) {
-            this.state.currentCharacter = id;
-            this.saveState();
-            this.render();
-        },
+};
 
-        toggleDMMode() {
-            this.state.isDMMode = !this.state.isDMMode;
-            this.saveState();
-            this.render();
-        },
+        // Initialize Firebase
+        let firebaseInitialized = false;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            firebaseInitialized = true;
+        } catch (e) {
+            console.warn('Firebase not configured. Using offline mode only.');
+        }
 
-        createItem(itemData) {
-            const char = this.state.characters[this.state.currentCharacter];
-            char.vault.push(itemData);
-            this.saveState();
-            this.render();
-        },
+        const app = {
+            state: {
+                characters: {},
+                currentCharacter: null,
+                isDMMode: false,
+                undoStack: [],
+                session: {
+                    active: false,
+                    code: null,
+                    isDM: false,
+                    assignedCharacter: null,
+                    ref: null
+                }
+            },
 
-        editItem(itemId) {
-            const char = this.state.characters[this.state.currentCharacter];
-            const item = char.vault.find(i => i.id === itemId);
-            if (!item) return;
-            this.showCreateItemModal(item);
-        },
+            init() {
+                this.loadState();
+                if (Object.keys(this.state.characters).length === 0) {
+                    this.createCharacter('New Character');
+                }
+                this.render();
+            },
 
-        updateItem(itemId, itemData) {
-            const char = this.state.characters[this.state.currentCharacter];
-            const index = char.vault.findIndex(i => i.id === itemId);
-            if (index !== -1) {
-                char.vault[index] = itemData;
+            loadState() {
+                const saved = localStorage.getItem('dndEquipmentTracker');
+                if (saved) {
+                    const loaded = JSON.parse(saved);
+                    this.state.characters = loaded.characters || {};
+                    this.state.currentCharacter = loaded.currentCharacter;
+                    this.state.isDMMode = loaded.isDMMode || false;
+                    this.state.undoStack = loaded.undoStack || [];
+                }
+            },
+
+            saveState() {
+                const toSave = {
+                    characters: this.state.characters,
+                    currentCharacter: this.state.currentCharacter,
+                    isDMMode: this.state.isDMMode,
+                    undoStack: this.state.undoStack
+                };
+                localStorage.setItem('dndEquipmentTracker', JSON.stringify(toSave));
+
+                // Sync to Firebase if in active session
+                if (this.state.session.active && this.state.session.isDM && this.state.session.ref) {
+                    this.syncToFirebase();
+                }
+            },
+
+            syncToFirebase() {
+                if (!this.state.session.ref) return;
+                
+                const data = {
+                    characters: this.state.characters,
+                    timestamp: Date.now()
+                };
+                
+                this.state.session.ref.set(data).catch(err => {
+                    console.error('Firebase sync error:', err);
+                });
+            },
+
+            generateSessionCode() {
+                return Math.random().toString(36).substring(2, 8).toUpperCase();
+            },
+
+            showHostModal() {
+                if (!firebaseInitialized) {
+                    alert('Firebase not configured. Please add your Firebase config to use multiplayer features.');
+                    return;
+                }
+
+                const modal = `
+                    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+                        <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+                            <h3 class="text-xl font-bold mb-4">Host Session (DM)</h3>
+                            <p class="text-sm text-gray-400 mb-4">
+                                You will host a session and share a code with players. 
+                                All your characters and items will be synced in real-time.
+                            </p>
+                            <div class="flex gap-2">
+                                <button onclick="app.hostSession(); this.closest('.fixed').remove();" 
+                                    class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded flex-grow">
+                                    Start Hosting
+                                </button>
+                                <button onclick="this.closest('.fixed').remove()" 
+                                    class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('modalContainer').innerHTML = modal;
+            },
+
+            hostSession() {
+                const code = this.generateSessionCode();
+                this.state.session.code = code;
+                this.state.session.active = true;
+                this.state.session.isDM = true;
+                this.state.isDMMode = true;
+
+                const sessionRef = firebase.database().ref('sessions/' + code);
+                this.state.session.ref = sessionRef;
+
+                // Initial sync
+                this.syncToFirebase();
+
+                this.render();
+                alert(`Session started! Share code with players: ${code}`);
+            },
+
+            showJoinModal() {
+                if (!firebaseInitialized) {
+                    alert('Firebase not configured. Please add your Firebase config to use multiplayer features.');
+                    return;
+                }
+
+                const modal = `
+                    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+                        <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+                            <h3 class="text-xl font-bold mb-4">Join Session (Player)</h3>
+                            <p class="text-sm text-gray-400 mb-4">
+                                Enter the session code provided by your DM.
+                            </p>
+                            <input type="text" id="joinCode" placeholder="Enter 6-digit code" 
+                                class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4 uppercase text-center text-2xl">
+                            <div class="flex gap-2">
+                                <button onclick="app.joinSession(document.getElementById('joinCode').value); this.closest('.fixed').remove();" 
+                                    class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">
+                                    Join Session
+                                </button>
+                                <button onclick="this.closest('.fixed').remove()" 
+                                    class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('modalContainer').innerHTML = modal;
+            },
+
+            joinSession(code) {
+                if (!code || code.length !== 6) {
+                    alert('Invalid session code');
+                    return;
+                }
+
+                code = code.toUpperCase();
+                this.state.session.code = code;
+                this.state.session.active = true;
+                this.state.session.isDM = false;
+                this.state.isDMMode = false;
+
+                const sessionRef = firebase.database().ref('sessions/' + code);
+                this.state.session.ref = sessionRef;
+
+                // Listen for updates
+                sessionRef.on('value', (snapshot) => {
+                    const data = snapshot.val();
+                    if (data && data.characters) {
+                        // Update characters but filter locked stats
+                        this.state.characters = this.filterLockedStats(data.characters);
+                        
+                        // Auto-select first character if none selected
+                        if (!this.state.currentCharacter || !this.state.characters[this.state.currentCharacter]) {
+                            this.state.currentCharacter = Object.keys(this.state.characters)[0];
+                        }
+                        
+                        this.render();
+                    }
+                });
+
+                // Push player changes back to DM
+                this.setupPlayerSync();
+
+                this.render();
+                alert(`Joined session: ${code}`);
+            },
+
+            setupPlayerSync() {
+                // When player makes changes, send them back to DM
+                const originalSaveState = this.saveState.bind(this);
+                this.saveState = () => {
+                    localStorage.setItem('dndEquipmentTracker', JSON.stringify({
+                        characters: this.state.characters,
+                        currentCharacter: this.state.currentCharacter,
+                        isDMMode: this.state.isDMMode,
+                        undoStack: this.state.undoStack
+                    }));
+
+                    if (this.state.session.active && !this.state.session.isDM && this.state.session.ref) {
+                        // Send player's current character updates back
+                        const char = this.state.characters[this.state.currentCharacter];
+                        if (char) {
+                            this.state.session.ref.child('characters/' + char.id).update(char);
+                        }
+                    }
+                };
+            },
+
+            filterLockedStats(characters) {
+                const filtered = JSON.parse(JSON.stringify(characters));
+                Object.values(filtered).forEach(char => {
+                    char.vault.forEach(item => {
+                        item.stats = item.stats.filter(stat => !stat.locked);
+                    });
+                });
+                return filtered;
+            },
+
+            disconnectSession() {
+                if (this.state.session.ref) {
+                    this.state.session.ref.off();
+                    
+                    // If DM, optionally clean up session
+                    if (this.state.session.isDM) {
+                        if (confirm('Delete session data from server?')) {
+                            this.state.session.ref.remove();
+                        }
+                    }
+                }
+
+                this.state.session = {
+                    active: false,
+                    code: null,
+                    isDM: false,
+                    assignedCharacter: null,
+                    ref: null
+                };
+
+                this.render();
+                alert('Disconnected from session');
+            },
+
+            createCharacter(name) {
+                const id = Date.now().toString();
+                this.state.characters[id] = {
+                    id,
+                    name,
+                    equipment: {},
+                    vault: []
+                };
+                this.state.currentCharacter = id;
                 this.saveState();
                 this.render();
-            }
-        },
+            },
 
-        duplicateItem(itemId) {
-            const char = this.state.characters[this.state.currentCharacter];
-            const item = char.vault.find(i => i.id === itemId);
-            if (!item) return;
-            const newItem = JSON.parse(JSON.stringify(item));
-            newItem.id = Date.now().toString();
-            newItem.name = item.name + ' (Copy)';
-            char.vault.push(newItem);
-            this.saveState();
-            this.render();
-        },
-
-        deleteItem(itemId) {
-            const char = this.state.characters[this.state.currentCharacter];
-            const item = char.vault.find(i => i.id === itemId);
-            if (item) {
-                this.state.undoStack.push({ type: 'item', data: item });
-            }
-            char.vault = char.vault.filter(i => i.id !== itemId);
-            this.saveState();
-            this.render();
-        },
-
-        equipItem(itemId, slot) {
-            const char = this.state.characters[this.state.currentCharacter];
-            const item = char.vault.find(i => i.id === itemId);
-            if (!item) return;
-
-            if (char.equipment[slot]) {
-                const currentItem = char.vault.find(i => i.id === char.equipment[slot]);
-                if (currentItem) {
-                    currentItem.equipped = false;
-                }
-            }
-
-            char.equipment[slot] = itemId;
-            item.equipped = true;
-            this.saveState();
-            this.render();
-        },
-
-        unequipItem(slot) {
-            const char = this.state.characters[this.state.currentCharacter];
-            if (char.equipment[slot]) {
-                const item = char.vault.find(i => i.id === char.equipment[slot]);
-                if (item) {
-                    item.equipped = false;
-                }
-                delete char.equipment[slot];
+            cloneCharacter() {
+                if (!this.state.currentCharacter) return;
+                const current = this.state.characters[this.state.currentCharacter];
+                const id = Date.now().toString();
+                this.state.characters[id] = {
+                    id,
+                    name: current.name + ' (Copy)',
+                    equipment: JSON.parse(JSON.stringify(current.equipment)),
+                    vault: JSON.parse(JSON.stringify(current.vault))
+                };
+                this.state.currentCharacter = id;
                 this.saveState();
                 this.render();
-            }
-        },
+            },
 
-        undo() {
-            if (this.state.undoStack.length === 0) return;
-            const action = this.state.undoStack.pop();
-            
-            if (action.type === 'character') {
-                this.state.characters[action.data.id] = action.data;
-                this.state.currentCharacter = action.data.id;
-            } else if (action.type === 'item') {
+            deleteCharacter() {
+                if (!this.state.currentCharacter) return;
+                if (Object.keys(this.state.characters).length === 1) {
+                    alert('Cannot delete the last character');
+                    return;
+                }
+                const deleted = this.state.characters[this.state.currentCharacter];
+                this.state.undoStack.push({ type: 'character', data: deleted });
+                delete this.state.characters[this.state.currentCharacter];
+                this.state.currentCharacter = Object.keys(this.state.characters)[0];
+                this.saveState();
+                this.render();
+            },
+
+            switchCharacter(id) {
+                this.state.currentCharacter = id;
+                this.saveState();
+                this.render();
+            },
+
+            createItem(itemData) {
                 const char = this.state.characters[this.state.currentCharacter];
-                char.vault.push(action.data);
-            }
-            
-            this.saveState();
-            this.render();
-        },
+                char.vault.push(itemData);
+                this.saveState();
+                this.render();
+            },
 
-        filterVault(searchTerm) {
-            const items = document.querySelectorAll('#vaultItems > div');
-            items.forEach(item => {
-                const name = item.querySelector('.item-name')?.textContent.toLowerCase() || '';
-                if (name.includes(searchTerm.toLowerCase())) {
-                    item.style.display = 'block';
-                } else {
-                    item.style.display = 'none';
+            editItem(itemId) {
+                const char = this.state.characters[this.state.currentCharacter];
+                const item = char.vault.find(i => i.id === itemId);
+                if (!item) return;
+                this.showCreateItemModal(item);
+            },
+
+            updateItem(itemId, itemData) {
+                const char = this.state.characters[this.state.currentCharacter];
+                const index = char.vault.findIndex(i => i.id === itemId);
+                if (index !== -1) {
+                    char.vault[index] = itemData;
+                    this.saveState();
+                    this.render();
                 }
-            });
-        },
+            },
 
-        calculateTotalStats() {
-            const char = this.state.characters[this.state.currentCharacter];
-            if (!char) return { stats: {}, hasHidden: false };
+            duplicateItem(itemId) {
+                const char = this.state.characters[this.state.currentCharacter];
+                const item = char.vault.find(i => i.id === itemId);
+                if (!item) return;
+                const newItem = JSON.parse(JSON.stringify(item));
+                newItem.id = Date.now().toString();
+                newItem.name = item.name + ' (Copy)';
+                char.vault.push(newItem);
+                this.saveState();
+                this.render();
+            },
 
-            const totals = {};
-            let hasHidden = false;
+            deleteItem(itemId) {
+                const char = this.state.characters[this.state.currentCharacter];
+                const item = char.vault.find(i => i.id === itemId);
+                if (item) {
+                    this.state.undoStack.push({ type: 'item', data: item });
+                }
+                char.vault = char.vault.filter(i => i.id !== itemId);
+                this.saveState();
+                this.render();
+            },
 
-            Object.values(char.equipment).forEach(itemId => {
+            equipItem(itemId, slot) {
+                const char = this.state.characters[this.state.currentCharacter];
                 const item = char.vault.find(i => i.id === itemId);
                 if (!item) return;
 
-                item.stats.forEach(stat => {
-                    if (stat.locked && !this.state.isDMMode) {
-                        hasHidden = true;
-                        return;
+                if (char.equipment[slot]) {
+                    const currentItem = char.vault.find(i => i.id === char.equipment[slot]);
+                    if (currentItem) {
+                        currentItem.equipped = false;
                     }
-                    if (!totals[stat.name]) {
-                        totals[stat.name] = 0;
-                    }
-                    totals[stat.name] += parseFloat(stat.value) || 0;
-                });
-            });
-
-            return { stats: totals, hasHidden };
-        },
-
-        showCreateCharacterModal() {
-            const modal = `
-                <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
-                    <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
-                        <h3 class="text-xl font-bold mb-4">Create Character</h3>
-                        <input type="text" id="charName" placeholder="Character Name" 
-                            class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
-                        <div class="flex gap-2">
-                            <button onclick="app.createCharacter(document.getElementById('charName').value); this.closest('.fixed').remove();" 
-                                class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">Create</button>
-                            <button onclick="this.closest('.fixed').remove()" 
-                                class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            document.getElementById('modalContainer').innerHTML = modal;
-        },
-
-        showCreateItemModal(existingItem = null) {
-            const isEdit = !!existingItem;
-            const item = existingItem || { name: '', rarity: 'Common', stats: [{ name: '', value: '', locked: false }] };
-            
-            const statsHtml = item.stats.map((stat, i) => `
-                <div class="flex gap-2 items-center stat-row">
-                    <input type="text" placeholder="Stat name" value="${stat.name}" 
-                        class="bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name">
-                    <input type="text" placeholder="Value" value="${stat.value}" 
-                        class="bg-gray-700 text-white px-3 py-2 rounded w-24 stat-value">
-                    <button onclick="this.closest('.stat-row').querySelector('.stat-locked').value = this.closest('.stat-row').querySelector('.stat-locked').value === 'true' ? 'false' : 'true'; this.textContent = this.closest('.stat-row').querySelector('.stat-locked').value === 'true' ? '🔒' : '🔓';" 
-                        class="bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded">${stat.locked ? '🔒' : '🔓'}</button>
-                    <input type="hidden" class="stat-locked" value="${stat.locked}">
-                    <button onclick="this.closest('.stat-row').remove()" 
-                        class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded">✕</button>
-                </div>
-            `).join('');
-
-            const modal = `
-                <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto" onclick="this.remove()">
-                    <div class="bg-gray-800 rounded-lg p-6 max-w-2xl w-full m-4" onclick="event.stopPropagation()">
-                        <h3 class="text-xl font-bold mb-4">${isEdit ? 'Edit Item' : 'Create Item'}</h3>
-                        <input type="text" id="itemName" placeholder="Item Name" value="${item.name}"
-                            class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
-                        <select id="itemRarity" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
-                            ${RARITIES.map(r => `<option value="${r}" ${r === item.rarity ? 'selected' : ''}>${r}</option>`).join('')}
-                        </select>
-                        <div class="mb-4">
-                            <div class="flex justify-between items-center mb-2">
-                                <label class="font-semibold">Stats</label>
-                                <button onclick="document.getElementById('statsContainer').insertAdjacentHTML('beforeend', \`
-                                    <div class='flex gap-2 items-center stat-row mt-2'>
-                                        <input type='text' placeholder='Stat name' class='bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name'>
-                                        <input type='text' placeholder='Value' class='bg-gray-700 text-white px-3 py-2 rounded w-24 stat-value'>
-                                        <button onclick='this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value = this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value === \\'true\\' ? \\'false\\' : \\'true\\'; this.textContent = this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value === \\'true\\' ? \\'🔒\\' : \\'🔓\\';' class='bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded'>🔓</button>
-                                        <input type='hidden' class='stat-locked' value='false'>
-                                        <button onclick='this.closest(\\'.stat-row\\').remove()' class='bg-red-600 hover:bg-red-700 px-3 py-2 rounded'>✕</button>
-                                    </div>
-                                \`)" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">+ Add Stat</button>
-                            </div>
-                            <div id="statsContainer" class="space-y-2">${statsHtml}</div>
-                        </div>
-                        <div class="flex gap-2">
-                            <button onclick="app.saveItem(${isEdit ? `'${item.id}'` : 'null'}); this.closest('.fixed').remove();" 
-                                class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">${isEdit ? 'Save' : 'Create'}</button>
-                            <button onclick="this.closest('.fixed').remove()" 
-                                class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            document.getElementById('modalContainer').innerHTML = modal;
-        },
-
-        saveItem(itemId) {
-            const name = document.getElementById('itemName').value;
-            const rarity = document.getElementById('itemRarity').value;
-            const statRows = document.querySelectorAll('.stat-row');
-            const stats = [];
-
-            statRows.forEach(row => {
-                const statName = row.querySelector('.stat-name').value;
-                const statValue = row.querySelector('.stat-value').value;
-                const statLocked = row.querySelector('.stat-locked').value === 'true';
-                if (statName || statValue) {
-                    stats.push({ name: statName, value: statValue, locked: statLocked });
                 }
-            });
 
-            const itemData = {
-                id: itemId || Date.now().toString(),
-                name: name || 'Unnamed Item',
-                rarity,
-                stats,
-                equipped: false
-            };
+                char.equipment[slot] = itemId;
+                item.equipped = true;
+                this.saveState();
+                this.render();
+            },
 
-            if (itemId) {
-                this.updateItem(itemId, itemData);
-            } else {
-                this.createItem(itemData);
-            }
-        },
-
-        showExportModal() {
-            const modal = `
-                <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
-                    <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
-                        <h3 class="text-xl font-bold mb-4">Export Token</h3>
-                        <p class="text-sm text-gray-400 mb-4">Choose export type:</p>
-                        <div class="space-y-2">
-                            <button onclick="app.exportToken('dm-single'); this.closest('.fixed').remove();" 
-                                class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-left">
-                                <div class="font-bold">DM Character Token</div>
-                                <div class="text-xs text-gray-300">Current character with all locked stats</div>
-                            </button>
-                            <button onclick="app.exportToken('player'); this.closest('.fixed').remove();" 
-                                class="w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-left">
-                                <div class="font-bold">Player Character Token</div>
-                                <div class="text-xs text-gray-300">Current character without locked stats</div>
-                            </button>
-                            <button onclick="app.exportToken('dm-all'); this.closest('.fixed').remove();" 
-                                class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded text-left">
-                                <div class="font-bold">DM Full Backup</div>
-                                <div class="text-xs text-gray-300">All characters with all data</div>
-                            </button>
-                        </div>
-                        <button onclick="this.closest('.fixed').remove()" 
-                            class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded w-full mt-4">Cancel</button>
-                    </div>
-                </div>
-            `;
-            document.getElementById('modalContainer').innerHTML = modal;
-        },
-
-        exportToken(type) {
-            let data;
-            let message;
-
-            if (type === 'dm-all') {
-                // Export everything
-                data = {
-                    type: 'full-backup',
-                    characters: this.state.characters
-                };
-                message = 'Full backup token copied to clipboard!';
-            } else if (type === 'dm-single') {
-                // Export single character with all data
+            unequipItem(slot) {
                 const char = this.state.characters[this.state.currentCharacter];
-                data = {
-                    type: 'character',
-                    character: JSON.parse(JSON.stringify(char))
-                };
-                message = 'DM character token copied to clipboard!';
-            } else if (type === 'player') {
-                // Export single character, strip locked stats
-                const char = this.state.characters[this.state.currentCharacter];
-                const cleanChar = JSON.parse(JSON.stringify(char));
-                cleanChar.vault = cleanChar.vault.map(item => ({
-                    ...item,
-                    stats: item.stats.filter(stat => !stat.locked)
-                }));
-                data = {
-                    type: 'character',
-                    character: cleanChar
-                };
-                message = 'Player character token copied to clipboard!';
-            }
-
-            const token = btoa(JSON.stringify(data));
-            navigator.clipboard.writeText(token).then(() => {
-                alert(message);
-            });
-        },
-
-        showImportModal() {
-            const modal = `
-                <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
-                    <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
-                        <h3 class="text-xl font-bold mb-4">Import Token</h3>
-                        <p class="text-sm text-gray-400 mb-2">Paste any token type:</p>
-                        <ul class="text-xs text-gray-500 mb-4 list-disc list-inside">
-                            <li>DM Character Token - Imports with all stats</li>
-                            <li>Player Character Token - Merges with existing locked stats</li>
-                            <li>DM Full Backup - Restores all characters</li>
-                        </ul>
-                        <textarea id="importToken" placeholder="Paste token here..." 
-                            class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4 h-32"></textarea>
-                        <div class="flex gap-2">
-                            <button onclick="app.importToken(document.getElementById('importToken').value); this.closest('.fixed').remove();" 
-                                class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">Import</button>
-                            <button onclick="this.closest('.fixed').remove()" 
-                                class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            document.getElementById('modalContainer').innerHTML = modal;
-        },
-
-        importToken(token) {
-            try {
-                const data = JSON.parse(atob(token));
-
-                if (data.type === 'full-backup') {
-                    // Restore all characters
-                    if (confirm('This will replace ALL current characters. Continue?')) {
-                        this.state.characters = data.characters;
-                        this.state.currentCharacter = Object.keys(data.characters)[0];
-                        this.saveState();
-                        this.render();
-                        alert('Full backup restored successfully!');
+                if (char.equipment[slot]) {
+                    const item = char.vault.find(i => i.id === char.equipment[slot]);
+                    if (item) {
+                        item.equipped = false;
                     }
-                } else if (data.type === 'character') {
-                    // Import single character
-                    const importedChar = data.character;
-                    
-                    // Check if this character already exists (by name for merging)
-                    const existingChar = Object.values(this.state.characters).find(c => c.name === importedChar.name);
-                    
-                    if (existingChar && this.state.isDMMode) {
-                        // DM Mode: Ask if they want to merge (preserve locked stats)
-                        if (confirm(`Character "${importedChar.name}" already exists. Merge updates while preserving hidden stats?`)) {
-                            this.mergeCharacter(existingChar, importedChar);
-                            alert('Character merged successfully! Hidden stats preserved.');
-                        } else {
-                            // Import as new character with different name
-                            const id = Date.now().toString();
-                            importedChar.id = id;
-                            importedChar.name = importedChar.name + ' (Imported)';
-                            this.state.characters[id] = importedChar;
-                            this.state.currentCharacter = id;
+                    delete char.equipment[slot];
+                    this.saveState();
+                    this.render();
+                }
+            },
+
+            undo() {
+                if (this.state.undoStack.length === 0) return;
+                const action = this.state.undoStack.pop();
+                
+                if (action.type === 'character') {
+                    this.state.characters[action.data.id] = action.data;
+                    this.state.currentCharacter = action.data.id;
+                } else if (action.type === 'item') {
+                    const char = this.state.characters[this.state.currentCharacter];
+                    char.vault.push(action.data);
+                }
+                
+                this.saveState();
+                this.render();
+            },
+
+            filterVault(searchTerm) {
+                const items = document.querySelectorAll('#vaultItems > div');
+                items.forEach(item => {
+                    const name = item.querySelector('.item-name')?.textContent.toLowerCase() || '';
+                    if (name.includes(searchTerm.toLowerCase())) {
+                        item.style.display = 'block';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+            },
+
+            calculateTotalStats() {
+                const char = this.state.characters[this.state.currentCharacter];
+                if (!char) return { stats: {}, hasHidden: false };
+
+                const totals = {};
+                let hasHidden = false;
+
+                Object.values(char.equipment).forEach(itemId => {
+                    const item = char.vault.find(i => i.id === itemId);
+                    if (!item) return;
+
+                    item.stats.forEach(stat => {
+                        if (stat.locked && !this.state.session.isDM) {
+                            hasHidden = true;
+                            return;
+                        }
+                        if (!totals[stat.name]) {
+                            totals[stat.name] = 0;
+                        }
+                        totals[stat.name] += parseFloat(stat.value) || 0;
+                    });
+                });
+
+                return { stats: totals, hasHidden };
+            },
+
+            showCreateCharacterModal() {
+                const modal = `
+                    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+                        <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+                            <h3 class="text-xl font-bold mb-4">Create Character</h3>
+                            <input type="text" id="charName" placeholder="Character Name" 
+                                class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+                            <div class="flex gap-2">
+                                <button onclick="app.createCharacter(document.getElementById('charName').value); this.closest('.fixed').remove();" 
+                                    class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">Create</button>
+                                <button onclick="this.closest('.fixed').remove()" 
+                                    class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('modalContainer').innerHTML = modal;
+            },
+
+            showCreateItemModal(existingItem = null) {
+                const isEdit = !!existingItem;
+                const item = existingItem || { name: '', rarity: 'Common', stats: [{ name: '', value: '', locked: false }] };
+                
+                const statsHtml = item.stats.map((stat, i) => `
+                    <div class="flex gap-2 items-center stat-row">
+                        <input type="text" placeholder="Stat name" value="${stat.name}" 
+                            class="bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name">
+                        <input type="text" placeholder="Value" value="${stat.value}" 
+                            class="bg-gray-700 text-white px-3 py-2 rounded w-24 stat-value">
+                        <button onclick="this.closest('.stat-row').querySelector('.stat-locked').value = this.closest('.stat-row').querySelector('.stat-locked').value === 'true' ? 'false' : 'true'; this.textContent = this.closest('.stat-row').querySelector('.stat-locked').value === 'true' ? '🔒' : '🔓';" 
+                            class="bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded">${stat.locked ? '🔒' : '🔓'}</button>
+                        <input type="hidden" class="stat-locked" value="${stat.locked}">
+                        <button onclick="this.closest('.stat-row').remove()" 
+                            class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded">✕</button>
+                    </div>
+                `).join('');
+
+                const modal = `
+                    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto" onclick="this.remove()">
+                        <div class="bg-gray-800 rounded-lg p-6 max-w-2xl w-full m-4" onclick="event.stopPropagation()">
+                            <h3 class="text-xl font-bold mb-4">${isEdit ? 'Edit Item' : 'Create Item'}</h3>
+                            <input type="text" id="itemName" placeholder="Item Name" value="${item.name}"
+                                class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+                            <select id="itemRarity" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+                                ${RARITIES.map(r => `<option value="${r}" ${r === item.rarity ? 'selected' : ''}>${r}</option>`).join('')}
+                            </select>
+                            <div class="mb-4">
+                                <div class="flex justify-between items-center mb-2">
+                                    <label class="font-semibold">Stats</label>
+                                    <button onclick="document.getElementById('statsContainer').insertAdjacentHTML('beforeend', \`
+                                        <div class='flex gap-2 items-center stat-row mt-2'>
+                                            <input type='text' placeholder='Stat name' class='bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name'>
+                                            <input type='text' placeholder='Value' class='bg-gray-700 text-white px-3 py-2 rounded w-24 stat-value'>
+                                            <button onclick='this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value = this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value === \\'true\\' ? \\'false\\' : \\'true\\'; this.textContent = this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value === \\'true\\' ? \\'🔒\\' : \\'🔓\\';' class='bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded'>🔓</button>
+                                            <input type='hidden' class='stat-locked' value='false'>
+                                            <button onclick='this.closest(\\'.stat-row\\').remove()' class='bg-red-600 hover:bg-red-700 px-3 py-2 rounded'>✕</button>
+                                        </div>
+                                    \`)" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">+ Add Stat</button>
+                                </div>
+                                <div id="statsContainer" class="space-y-2">${statsHtml}</div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="app.saveItem(${isEdit ? `'${item.id}'` : 'null'}); this.closest('.fixed').remove();" 
+                                    class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">${isEdit ? 'Save' : 'Create'}</button>
+                                <button onclick="this.closest('.fixed').remove()" 
+                                    class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('modalContainer').innerHTML = modal;
+            },
+
+            saveItem(itemId) {
+                const name = document.getElementById('itemName').value;
+                const rarity = document.getElementById('itemRarity').value;
+                const statRows = document.querySelectorAll('.stat-row');
+                const stats = [];
+
+                statRows.forEach(row => {
+                    const statName = row.querySelector('.stat-name').value;
+                    const statValue = row.querySelector('.stat-value').value;
+                    const statLocked = row.querySelector('.stat-locked').value === 'true';
+                    if (statName || statValue) {
+                        stats.push({ name: statName, value: statValue, locked: statLocked });
+                    }
+                });
+
+                const itemData = {
+                    id: itemId || Date.now().toString(),
+                    name: name || 'Unnamed Item',
+                    rarity,
+                    stats,
+                    equipped: false
+                };
+
+                if (itemId) {
+                    this.updateItem(itemId, itemData);
+                } else {
+                    this.createItem(itemData);
+                }
+            },
+
+            showExportModal() {
+                const modal = `
+                    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+                        <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+                            <h3 class="text-xl font-bold mb-4">Export Backup</h3>
+                            <p class="text-sm text-gray-400 mb-4">Save your data as a token for backup:</p>
+                            <div class="space-y-2">
+                                <button onclick="app.exportToken('dm-all'); this.closest('.fixed').remove();" 
+                                    class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded text-left">
+                                    <div class="font-bold">💾 DM Master Backup</div>
+                                    <div class="text-xs text-gray-300">All characters with all data (for session restore)</div>
+                                </button>
+                            </div>
+                            <button onclick="this.closest('.fixed').remove()" 
+                                class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded w-full mt-4">Cancel</button>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('modalContainer').innerHTML = modal;
+            },
+
+            exportToken(type) {
+                let data;
+                let message;
+
+                if (type === 'dm-all') {
+                    data = {
+                        type: 'full-backup',
+                        characters: this.state.characters
+                    };
+                    message = 'Master backup token copied to clipboard!';
+                }
+
+                const token = btoa(JSON.stringify(data));
+                navigator.clipboard.writeText(token).then(() => {
+                    alert(message);
+                });
+            },
+
+            showImportModal() {
+                const modal = `
+                    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+                        <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+                            <h3 class="text-xl font-bold mb-4">Import Backup</h3>
+                            <p class="text-sm text-gray-400 mb-2">Paste your master backup token:</p>
+                            <textarea id="importToken" placeholder="Paste token here..." 
+                                class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4 h-32"></textarea>
+                            <div class="flex gap-2">
+                                <button onclick="app.importToken(document.getElementById('importToken').value); this.closest('.fixed').remove();" 
+                                    class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">Import</button>
+                                <button onclick="this.closest('.fixed').remove()" 
+                                    class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('modalContainer').innerHTML = modal;
+            },
+
+            importToken(token) {
+                try {
+                    const data = JSON.parse(atob(token));
+
+                    if (data.type === 'full-backup') {
+                        if (confirm('This will replace ALL current characters. Continue?')) {
+                            this.state.characters = data.characters;
+                            this.state.currentCharacter = Object.keys(data.characters)[0];
                             this.saveState();
                             this.render();
-                            alert('Character imported as new!');
+                            alert('Master backup restored successfully!');
                         }
-                    } else {
-                        // Just import as new character
-                        const id = Date.now().toString();
-                        importedChar.id = id;
-                        this.state.characters[id] = importedChar;
-                        this.state.currentCharacter = id;
-                        this.saveState();
-                        this.render();
-                        alert('Character imported successfully!');
                     }
+                } catch (e) {
+                    alert('Invalid token!');
+                    console.error(e);
                 }
-            } catch (e) {
-                alert('Invalid token!');
-                console.error(e);
-            }
-        },
+            },
 
-        mergeCharacter(existingChar, importedChar) {
-            // Create a map of existing items with their locked stats
-            const existingItemsMap = new Map();
-            existingChar.vault.forEach(item => {
-                existingItemsMap.set(item.name, item);
-            });
+            render() {
+                this.renderCharacterSelect();
+                this.renderEquipmentSlots();
+                this.renderVault();
+                this.renderTotalStats();
+                this.renderSessionStatus();
+                this.renderUndoButton();
+                this.renderPermissions();
+            },
 
-            // Update imported items to restore locked stats if they exist
-            importedChar.vault.forEach(importedItem => {
-                const existingItem = existingItemsMap.get(importedItem.name);
-                if (existingItem) {
-                    // Merge stats: keep locked stats from existing, update unlocked from imported
-                    const lockedStats = existingItem.stats.filter(s => s.locked);
-                    const unlockedStats = importedItem.stats.filter(s => !s.locked);
-                    
-                    // Combine them, but avoid duplicates by name
-                    const statMap = new Map();
-                    lockedStats.forEach(s => statMap.set(s.name, s));
-                    unlockedStats.forEach(s => statMap.set(s.name, s));
-                    
-                    importedItem.stats = Array.from(statMap.values());
-                }
-            });
+            renderCharacterSelect() {
+                const select = document.getElementById('characterSelect');
+                select.innerHTML = Object.values(this.state.characters)
+                    .map(char => `<option value="${char.id}" ${char.id === this.state.currentCharacter ? 'selected' : ''}>${char.name}</option>`)
+                    .join('');
+            },
 
-            // Replace the existing character with merged data
-            existingChar.equipment = importedChar.equipment;
-            existingChar.vault = importedChar.vault;
-            
-            this.state.currentCharacter = existingChar.id;
-            this.saveState();
-            this.render();
-        },
-
-        render() {
-            this.renderCharacterSelect();
-            this.renderEquipmentSlots();
-            this.renderVault();
-            this.renderTotalStats();
-            this.renderDMToggle();
-            this.renderUndoButton();
-        },
-
-        renderCharacterSelect() {
-            const select = document.getElementById('characterSelect');
-            select.innerHTML = Object.values(this.state.characters)
-                .map(char => `<option value="${char.id}" ${char.id === this.state.currentCharacter ? 'selected' : ''}>${char.name}</option>`)
-                .join('');
-        },
-
-        renderEquipmentSlots() {
-            const char = this.state.characters[this.state.currentCharacter];
-            const container = document.getElementById('equipmentSlots');
-            
-            container.innerHTML = SLOTS.map(slot => {
-                const itemId = char.equipment[slot];
-                const item = itemId ? char.vault.find(i => i.id === itemId) : null;
+            renderEquipmentSlots() {
+                const char = this.state.characters[this.state.currentCharacter];
+                const container = document.getElementById('equipmentSlots');
                 
-                if (item) {
-                    const visibleStats = item.stats.filter(s => this.state.isDMMode || !s.locked);
-                    const hasHiddenStats = item.stats.some(s => s.locked) && !this.state.isDMMode;
+                container.innerHTML = SLOTS.map(slot => {
+                    const itemId = char.equipment[slot];
+                    const item = itemId ? char.vault.find(i => i.id === itemId) : null;
+                    
+                    if (item) {
+                        const visibleStats = item.stats.filter(s => this.state.session.isDM || !s.locked);
+                        const hasHiddenStats = item.stats.some(s => s.locked) && !this.state.session.isDM;
+                        
+                        return `
+                            <div class="bg-gray-700 rounded-lg p-4 slot-filled rarity-${item.rarity.toLowerCase().replace(' ', '')}">
+                                <div class="flex justify-between items-start mb-2">
+                                    <div>
+                                        <div class="font-bold">${slot}</div>
+                                        <div class="text-sm text-blue-300">${item.name}</div>
+                                        <div class="text-xs text-gray-400">${item.rarity}</div>
+                                    </div>
+                                    <button onclick="app.unequipItem('${slot}')" 
+                                        class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-sm">Unequip</button>
+                                </div>
+                                ${visibleStats.length > 0 ? `
+                                    <div class="text-sm mt-2 space-y-1">
+                                        ${visibleStats.map(s => `<div class="flex justify-between"><span>${s.name}:</span><span class="text-green-400">${s.value}</span></div>`).join('')}
+                                        ${hasHiddenStats ? '<div class="text-xs text-yellow-400 mt-1">🔒 Contains hidden stats</div>' : ''}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `;
+                    } else {
+                        return `
+                            <div class="bg-gray-700 rounded-lg p-4 slot-empty">
+                                <div class="font-bold text-gray-400">${slot}</div>
+                                <div class="text-sm text-gray-500">Empty</div>
+                            </div>
+                        `;
+                    }
+                }).join('');
+            },
+
+            renderVault() {
+                const char = this.state.characters[this.state.currentCharacter];
+                const container = document.getElementById('vaultItems');
+                
+                const unequippedItems = char.vault.filter(item => !item.equipped);
+                
+                if (unequippedItems.length === 0) {
+                    container.innerHTML = '<div class="text-gray-500 text-center py-4">No items in vault</div>';
+                    return;
+                }
+                
+                const canEdit = this.state.session.isDM || !this.state.session.active;
+                
+                container.innerHTML = unequippedItems.map(item => {
+                    const visibleStats = item.stats.filter(s => this.state.session.isDM || !s.locked);
+                    const hasHiddenStats = item.stats.some(s => s.locked) && !this.state.session.isDM;
                     
                     return `
-                        <div class="bg-gray-700 rounded-lg p-4 slot-filled rarity-${item.rarity.toLowerCase().replace(' ', '')}">
+                        <div class="bg-gray-700 rounded-lg p-3 rarity-${item.rarity.toLowerCase().replace(' ', '')}">
                             <div class="flex justify-between items-start mb-2">
-                                <div>
-                                    <div class="font-bold">${slot}</div>
-                                    <div class="text-sm text-blue-300">${item.name}</div>
+                                <div class="flex-grow">
+                                    <div class="font-bold item-name">${item.name}</div>
                                     <div class="text-xs text-gray-400">${item.rarity}</div>
                                 </div>
-                                <button onclick="app.unequipItem('${slot}')" 
-                                    class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-sm">Unequip</button>
+                                ${canEdit ? `
+                                    <div class="flex gap-1">
+                                        <button onclick="app.editItem('${item.id}')" 
+                                            class="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs">Edit</button>
+                                        <button onclick="app.duplicateItem('${item.id}')" 
+                                            class="bg-yellow-600 hover:bg-yellow-700 px-2 py-1 rounded text-xs">Copy</button>
+                                        <button onclick="app.deleteItem('${item.id}')" 
+                                            class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs">Del</button>
+                                    </div>
+                                ` : ''}
                             </div>
                             ${visibleStats.length > 0 ? `
-                                <div class="text-sm mt-2 space-y-1">
+                                <div class="text-xs space-y-1 mb-2">
                                     ${visibleStats.map(s => `<div class="flex justify-between"><span>${s.name}:</span><span class="text-green-400">${s.value}</span></div>`).join('')}
                                     ${hasHiddenStats ? '<div class="text-xs text-yellow-400 mt-1">🔒 Contains hidden stats</div>' : ''}
                                 </div>
                             ` : ''}
+                            <select onchange="if(this.value) { app.equipItem('${item.id}', this.value); this.value = ''; }" 
+                                class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
+                                <option value="">Equip to...</option>
+                                ${SLOTS.map(slot => `<option value="${slot}">${slot}</option>`).join('')}
+                            </select>
                         </div>
                     `;
-                } else {
-                    return `
-                        <div class="bg-gray-700 rounded-lg p-4 slot-empty">
-                            <div class="font-bold text-gray-400">${slot}</div>
-                            <div class="text-sm text-gray-500">Empty</div>
-                        </div>
-                    `;
-                }
-            }).join('');
-        },
+                }).join('');
+            },
 
-        renderVault() {
-            const char = this.state.characters[this.state.currentCharacter];
-            const container = document.getElementById('vaultItems');
-            
-            const unequippedItems = char.vault.filter(item => !item.equipped);
-            
-            if (unequippedItems.length === 0) {
-                container.innerHTML = '<div class="text-gray-500 text-center py-4">No items in vault</div>';
-                return;
-            }
-            
-            container.innerHTML = unequippedItems.map(item => {
-                const visibleStats = item.stats.filter(s => this.state.isDMMode || !s.locked);
-                const hasHiddenStats = item.stats.some(s => s.locked) && !this.state.isDMMode;
+            renderTotalStats() {
+                const { stats, hasHidden } = this.calculateTotalStats();
+                const container = document.getElementById('totalStats');
                 
-                return `
-                    <div class="bg-gray-700 rounded-lg p-3 rarity-${item.rarity.toLowerCase().replace(' ', '')}">
-                        <div class="flex justify-between items-start mb-2">
-                            <div class="flex-grow">
-                                <div class="font-bold item-name">${item.name}</div>
-                                <div class="text-xs text-gray-400">${item.rarity}</div>
-                            </div>
-                            <div class="flex gap-1">
-                                <button onclick="app.editItem('${item.id}')" 
-                                    class="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs">Edit</button>
-                                <button onclick="app.duplicateItem('${item.id}')" 
-                                    class="bg-yellow-600 hover:bg-yellow-700 px-2 py-1 rounded text-xs">Copy</button>
-                                <button onclick="app.deleteItem('${item.id}')" 
-                                    class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs">Del</button>
-                            </div>
-                        </div>
-                        ${visibleStats.length > 0 ? `
-                            <div class="text-xs space-y-1 mb-2">
-                                ${visibleStats.map(s => `<div class="flex justify-between"><span>${s.name}:</span><span class="text-green-400">${s.value}</span></div>`).join('')}
-                                ${hasHiddenStats ? '<div class="text-xs text-yellow-400 mt-1">🔒 Contains hidden stats</div>' : ''}
-                            </div>
-                        ` : ''}
-                        <select onchange="if(this.value) { app.equipItem('${item.id}', this.value); this.value = ''; }" 
-                            class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
-                            <option value="">Equip to...</option>
-                            ${SLOTS.map(slot => `<option value="${slot}">${slot}</option>`).join('')}
-                        </select>
+                const entries = Object.entries(stats);
+                
+                if (entries.length === 0) {
+                    container.innerHTML = '<div class="col-span-full text-gray-500 text-center py-4">No equipment stats</div>';
+                    return;
+                }
+                
+                container.innerHTML = entries.map(([name, value]) => `
+                    <div class="bg-gray-700 rounded p-3">
+                        <div class="text-sm text-gray-400">${name}</div>
+                        <div class="text-xl font-bold text-green-400">${value}</div>
                     </div>
-                `;
-            }).join('');
-        },
+                `).join('') + (hasHidden ? `
+                    <div class="col-span-full bg-yellow-900 bg-opacity-30 rounded p-3 text-yellow-400 text-sm text-center">
+                        🔒 Some stats are hidden (Player Mode)
+                    </div>
+                ` : '');
+            },
 
-        renderTotalStats() {
-            const { stats, hasHidden } = this.calculateTotalStats();
-            const container = document.getElementById('totalStats');
-            
-            const entries = Object.entries(stats);
-            
-            if (entries.length === 0) {
-                container.innerHTML = '<div class="col-span-full text-gray-500 text-center py-4">No equipment stats</div>';
-                return;
+            renderSessionStatus() {
+                const statusEl = document.getElementById('sessionStatus');
+                const infoEl = document.getElementById('activeSessionInfo');
+                const codeEl = document.getElementById('sessionCode');
+
+                if (this.state.session.active) {
+                    statusEl.innerHTML = `
+                        <span class="w-2 h-2 bg-green-500 rounded-full pulse-online"></span>
+                        <span class="text-sm font-bold text-green-400">${this.state.session.isDM ? 'Hosting' : 'Connected'}</span>
+                    `;
+                    infoEl.classList.remove('hidden');
+                    codeEl.textContent = this.state.session.code;
+                } else {
+                    statusEl.innerHTML = '<span class="text-sm text-gray-400">Offline</span>';
+                    infoEl.classList.add('hidden');
+                }
+            },
+
+            renderUndoButton() {
+                const btn = document.getElementById('undoBtn');
+                if (this.state.undoStack.length > 0) {
+                    btn.classList.remove('hidden');
+                } else {
+                    btn.classList.add('hidden');
+                }
+            },
+
+            renderPermissions() {
+                // Disable certain buttons if player in session
+                const isPlayer = this.state.session.active && !this.state.session.isDM;
+                
+                const disableForPlayer = ['newCharBtn', 'cloneCharBtn', 'deleteCharBtn', 'addItemBtn'];
+                disableForPlayer.forEach(btnId => {
+                    const btn = document.getElementById(btnId);
+                    if (btn) {
+                        if (isPlayer) {
+                            btn.disabled = true;
+                            btn.classList.add('opacity-50', 'cursor-not-allowed');
+                        } else {
+                            btn.disabled = false;
+                            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                        }
+                    }
+                });
             }
-            
-            container.innerHTML = entries.map(([name, value]) => `
-                <div class="bg-gray-700 rounded p-3">
-                    <div class="text-sm text-gray-400">${name}</div>
-                    <div class="text-xl font-bold text-green-400">${value}</div>
-                </div>
-            `).join('') + (hasHidden ? `
-                <div class="col-span-full bg-yellow-900 bg-opacity-30 rounded p-3 text-yellow-400 text-sm text-center">
-                    🔒 Some stats are hidden in Player Mode
-                </div>
-            ` : '');
-        },
+        };
 
-        renderDMToggle() {
-            const btn = document.getElementById('dmToggle');
-            if (this.state.isDMMode) {
-                btn.textContent = 'DM Mode';
-                btn.className = 'px-4 py-2 rounded font-semibold bg-red-600 hover:bg-red-700';
-            } else {
-                btn.textContent = 'Player Mode';
-                btn.className = 'px-4 py-2 rounded font-semibold bg-blue-600 hover:bg-blue-700';
-            }
-        },
-
-        renderUndoButton() {
-            const btn = document.getElementById('undoBtn');
-            if (this.state.undoStack.length > 0) {
-                btn.classList.remove('hidden');
-            } else {
-                btn.classList.add('hidden');
-            }
-        }
-    };
-
-    window.onload = () => app.init();
-</script>
-
+        window.onload = () => app.init();
+    </script>
 </body>
 </html>
