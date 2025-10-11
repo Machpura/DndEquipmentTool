@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D&D 5e Equipment Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .rarity-common { border-left: 4px solid #9ca3af; }
+        .rarity-uncommon { border-left: 4px solid #10b981; }
+        .rarity-rare { border-left: 4px solid #3b82f6; }
+        .rarity-veryrare { border-left: 4px solid #8b5cf6; }
+        .rarity-legendary { border-left: 4px solid #f59e0b; }
+        .rarity-artifact { border-left: 4px solid #ef4444; }
+        .slot-empty { border: 2px dashed #d1d5db; }
+        .slot-filled { border: 2px solid #3b82f6; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div id="app" class="container mx-auto p-4 max-w-7xl">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-blue-400">D&D 5e Equipment Tracker</h1>
+            <div class="flex gap-4 items-center">
+                <button onclick="app.toggleDMMode()" class="px-4 py-2 rounded font-semibold" id="dmToggle">
+                    Player Mode
+                </button>
+                <button onclick="app.showExportModal()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded">
+                    Export Token
+                </button>
+                <button onclick="app.showImportModal()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded">
+                    Import Token
+                </button>
+            </div>
+        </div>
+
+```
+    <!-- Character Selection -->
+    <div class="bg-gray-800 rounded-lg p-4 mb-6">
+        <div class="flex gap-4 items-center flex-wrap">
+            <select id="characterSelect" onchange="app.switchCharacter(this.value)" class="bg-gray-700 text-white px-4 py-2 rounded flex-grow">
+            </select>
+            <button onclick="app.showCreateCharacterModal()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">
+                New Character
+            </button>
+            <button onclick="app.cloneCharacter()" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded">
+                Clone
+            </button>
+            <button onclick="app.deleteCharacter()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded">
+                Delete
+            </button>
+            <button onclick="app.undo()" id="undoBtn" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded hidden">
+                Undo Delete
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Equipment Slots -->
+        <div class="lg:col-span-2">
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-2xl font-bold mb-4 text-blue-300">Equipment Slots</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="equipmentSlots"></div>
+            </div>
+
+            <!-- Total Stats -->
+            <div class="bg-gray-800 rounded-lg p-6 mt-6">
+                <h2 class="text-2xl font-bold mb-4 text-blue-300">Total Stats</h2>
+                <div id="totalStats" class="grid grid-cols-2 md:grid-cols-3 gap-3"></div>
+            </div>
+        </div>
+
+        <!-- Vault -->
+        <div>
+            <div class="bg-gray-800 rounded-lg p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-bold text-blue-300">Item Vault</h2>
+                    <button onclick="app.showCreateItemModal()" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">
+                        + Add Item
+                    </button>
+                </div>
+                <input type="text" id="vaultSearch" oninput="app.filterVault(this.value)" 
+                    placeholder="Search items..." class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+                <div id="vaultItems" class="space-y-2 max-h-96 overflow-y-auto"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modals -->
+<div id="modalContainer"></div>
+
+<script>
+    const SLOTS = ['Head', 'Amulet', 'Cloak', 'Armor', 'Belt', 'Gloves', 'Ring 1', 'Ring 2', 
+                   'Main Hand', 'Off Hand', 'Shield', 'Boots', 'Misc 1', 'Misc 2'];
+    const RARITIES = ['Common', 'Uncommon', 'Rare', 'Very Rare', 'Legendary', 'Artifact'];
+
+    const app = {
+        state: {
+            characters: {},
+            currentCharacter: null,
+            isDMMode: false,
+            undoStack: []
+        },
+
+        init() {
+            this.loadState();
+            if (Object.keys(this.state.characters).length === 0) {
+                this.createCharacter('New Character');
+            }
+            this.render();
+        },
+
+        loadState() {
+            const saved = localStorage.getItem('dndEquipmentTracker');
+            if (saved) {
+                this.state = JSON.parse(saved);
+            }
+        },
+
+        saveState() {
+            localStorage.setItem('dndEquipmentTracker', JSON.stringify(this.state));
+        },
+
+        createCharacter(name) {
+            const id = Date.now().toString();
+            this.state.characters[id] = {
+                id,
+                name,
+                equipment: {},
+                vault: []
+            };
+            this.state.currentCharacter = id;
+            this.saveState();
+            this.render();
+        },
+
+        cloneCharacter() {
+            if (!this.state.currentCharacter) return;
+            const current = this.state.characters[this.state.currentCharacter];
+            const id = Date.now().toString();
+            this.state.characters[id] = {
+                id,
+                name: current.name + ' (Copy)',
+                equipment: JSON.parse(JSON.stringify(current.equipment)),
+                vault: JSON.parse(JSON.stringify(current.vault))
+            };
+            this.state.currentCharacter = id;
+            this.saveState();
+            this.render();
+        },
+
+        deleteCharacter() {
+            if (!this.state.currentCharacter) return;
+            if (Object.keys(this.state.characters).length === 1) {
+                alert('Cannot delete the last character');
+                return;
+            }
+            const deleted = this.state.characters[this.state.currentCharacter];
+            this.state.undoStack.push({ type: 'character', data: deleted });
+            delete this.state.characters[this.state.currentCharacter];
+            this.state.currentCharacter = Object.keys(this.state.characters)[0];
+            this.saveState();
+            this.render();
+        },
+
+        switchCharacter(id) {
+            this.state.currentCharacter = id;
+            this.saveState();
+            this.render();
+        },
+
+        toggleDMMode() {
+            this.state.isDMMode = !this.state.isDMMode;
+            this.saveState();
+            this.render();
+        },
+
+        createItem(itemData) {
+            const char = this.state.characters[this.state.currentCharacter];
+            char.vault.push(itemData);
+            this.saveState();
+            this.render();
+        },
+
+        editItem(itemId) {
+            const char = this.state.characters[this.state.currentCharacter];
+            const item = char.vault.find(i => i.id === itemId);
+            if (!item) return;
+            this.showCreateItemModal(item);
+        },
+
+        updateItem(itemId, itemData) {
+            const char = this.state.characters[this.state.currentCharacter];
+            const index = char.vault.findIndex(i => i.id === itemId);
+            if (index !== -1) {
+                char.vault[index] = itemData;
+                this.saveState();
+                this.render();
+            }
+        },
+
+        duplicateItem(itemId) {
+            const char = this.state.characters[this.state.currentCharacter];
+            const item = char.vault.find(i => i.id === itemId);
+            if (!item) return;
+            const newItem = JSON.parse(JSON.stringify(item));
+            newItem.id = Date.now().toString();
+            newItem.name = item.name + ' (Copy)';
+            char.vault.push(newItem);
+            this.saveState();
+            this.render();
+        },
+
+        deleteItem(itemId) {
+            const char = this.state.characters[this.state.currentCharacter];
+            const item = char.vault.find(i => i.id === itemId);
+            if (item) {
+                this.state.undoStack.push({ type: 'item', data: item });
+            }
+            char.vault = char.vault.filter(i => i.id !== itemId);
+            this.saveState();
+            this.render();
+        },
+
+        equipItem(itemId, slot) {
+            const char = this.state.characters[this.state.currentCharacter];
+            const item = char.vault.find(i => i.id === itemId);
+            if (!item) return;
+
+            if (char.equipment[slot]) {
+                const currentItem = char.vault.find(i => i.id === char.equipment[slot]);
+                if (currentItem) {
+                    currentItem.equipped = false;
+                }
+            }
+
+            char.equipment[slot] = itemId;
+            item.equipped = true;
+            this.saveState();
+            this.render();
+        },
+
+        unequipItem(slot) {
+            const char = this.state.characters[this.state.currentCharacter];
+            if (char.equipment[slot]) {
+                const item = char.vault.find(i => i.id === char.equipment[slot]);
+                if (item) {
+                    item.equipped = false;
+                }
+                delete char.equipment[slot];
+                this.saveState();
+                this.render();
+            }
+        },
+
+        undo() {
+            if (this.state.undoStack.length === 0) return;
+            const action = this.state.undoStack.pop();
+            
+            if (action.type === 'character') {
+                this.state.characters[action.data.id] = action.data;
+                this.state.currentCharacter = action.data.id;
+            } else if (action.type === 'item') {
+                const char = this.state.characters[this.state.currentCharacter];
+                char.vault.push(action.data);
+            }
+            
+            this.saveState();
+            this.render();
+        },
+
+        filterVault(searchTerm) {
+            const items = document.querySelectorAll('#vaultItems > div');
+            items.forEach(item => {
+                const name = item.querySelector('.item-name')?.textContent.toLowerCase() || '';
+                if (name.includes(searchTerm.toLowerCase())) {
+                    item.style.display = 'block';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        },
+
+        calculateTotalStats() {
+            const char = this.state.characters[this.state.currentCharacter];
+            if (!char) return { stats: {}, hasHidden: false };
+
+            const totals = {};
+            let hasHidden = false;
+
+            Object.values(char.equipment).forEach(itemId => {
+                const item = char.vault.find(i => i.id === itemId);
+                if (!item) return;
+
+                item.stats.forEach(stat => {
+                    if (stat.locked && !this.state.isDMMode) {
+                        hasHidden = true;
+                        return;
+                    }
+                    if (!totals[stat.name]) {
+                        totals[stat.name] = 0;
+                    }
+                    totals[stat.name] += parseFloat(stat.value) || 0;
+                });
+            });
+
+            return { stats: totals, hasHidden };
+        },
+
+        showCreateCharacterModal() {
+            const modal = `
+                <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+                    <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+                        <h3 class="text-xl font-bold mb-4">Create Character</h3>
+                        <input type="text" id="charName" placeholder="Character Name" 
+                            class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+                        <div class="flex gap-2">
+                            <button onclick="app.createCharacter(document.getElementById('charName').value); this.closest('.fixed').remove();" 
+                                class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">Create</button>
+                            <button onclick="this.closest('.fixed').remove()" 
+                                class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('modalContainer').innerHTML = modal;
+        },
+
+        showCreateItemModal(existingItem = null) {
+            const isEdit = !!existingItem;
+            const item = existingItem || { name: '', rarity: 'Common', stats: [{ name: '', value: '', locked: false }] };
+            
+            const statsHtml = item.stats.map((stat, i) => `
+                <div class="flex gap-2 items-center stat-row">
+                    <input type="text" placeholder="Stat name" value="${stat.name}" 
+                        class="bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name">
+                    <input type="text" placeholder="Value" value="${stat.value}" 
+                        class="bg-gray-700 text-white px-3 py-2 rounded w-24 stat-value">
+                    <button onclick="this.closest('.stat-row').querySelector('.stat-locked').value = this.closest('.stat-row').querySelector('.stat-locked').value === 'true' ? 'false' : 'true'; this.textContent = this.closest('.stat-row').querySelector('.stat-locked').value === 'true' ? '🔒' : '🔓';" 
+                        class="bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded">${stat.locked ? '🔒' : '🔓'}</button>
+                    <input type="hidden" class="stat-locked" value="${stat.locked}">
+                    <button onclick="this.closest('.stat-row').remove()" 
+                        class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded">✕</button>
+                </div>
+            `).join('');
+
+            const modal = `
+                <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto" onclick="this.remove()">
+                    <div class="bg-gray-800 rounded-lg p-6 max-w-2xl w-full m-4" onclick="event.stopPropagation()">
+                        <h3 class="text-xl font-bold mb-4">${isEdit ? 'Edit Item' : 'Create Item'}</h3>
+                        <input type="text" id="itemName" placeholder="Item Name" value="${item.name}"
+                            class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+                        <select id="itemRarity" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+                            ${RARITIES.map(r => `<option value="${r}" ${r === item.rarity ? 'selected' : ''}>${r}</option>`).join('')}
+                        </select>
+                        <div class="mb-4">
+                            <div class="flex justify-between items-center mb-2">
+                                <label class="font-semibold">Stats</label>
+                                <button onclick="document.getElementById('statsContainer').insertAdjacentHTML('beforeend', \`
+                                    <div class='flex gap-2 items-center stat-row mt-2'>
+                                        <input type='text' placeholder='Stat name' class='bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name'>
+                                        <input type='text' placeholder='Value' class='bg-gray-700 text-white px-3 py-2 rounded w-24 stat-value'>
+                                        <button onclick='this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value = this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value === \\'true\\' ? \\'false\\' : \\'true\\'; this.textContent = this.closest(\\'.stat-row\\').querySelector(\\'.stat-locked\\').value === \\'true\\' ? \\'🔒\\' : \\'🔓\\';' class='bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded'>🔓</button>
+                                        <input type='hidden' class='stat-locked' value='false'>
+                                        <button onclick='this.closest(\\'.stat-row\\').remove()' class='bg-red-600 hover:bg-red-700 px-3 py-2 rounded'>✕</button>
+                                    </div>
+                                \`)" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">+ Add Stat</button>
+                            </div>
+                            <div id="statsContainer" class="space-y-2">${statsHtml}</div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="app.saveItem(${isEdit ? `'${item.id}'` : 'null'}); this.closest('.fixed').remove();" 
+                                class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">${isEdit ? 'Save' : 'Create'}</button>
+                            <button onclick="this.closest('.fixed').remove()" 
+                                class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('modalContainer').innerHTML = modal;
+        },
+
+        saveItem(itemId) {
+            const name = document.getElementById('itemName').value;
+            const rarity = document.getElementById('itemRarity').value;
+            const statRows = document.querySelectorAll('.stat-row');
+            const stats = [];
+
+            statRows.forEach(row => {
+                const statName = row.querySelector('.stat-name').value;
+                const statValue = row.querySelector('.stat-value').value;
+                const statLocked = row.querySelector('.stat-locked').value === 'true';
+                if (statName || statValue) {
+                    stats.push({ name: statName, value: statValue, locked: statLocked });
+                }
+            });
+
+            const itemData = {
+                id: itemId || Date.now().toString(),
+                name: name || 'Unnamed Item',
+                rarity,
+                stats,
+                equipped: false
+            };
+
+            if (itemId) {
+                this.updateItem(itemId, itemData);
+            } else {
+                this.createItem(itemData);
+            }
+        },
+
+        showExportModal() {
+            const modal = `
+                <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+                    <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+                        <h3 class="text-xl font-bold mb-4">Export Token</h3>
+                        <div class="flex gap-2">
+                            <button onclick="app.exportToken(true); this.closest('.fixed').remove();" 
+                                class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">DM Token</button>
+                            <button onclick="app.exportToken(false); this.closest('.fixed').remove();" 
+                                class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded flex-grow">Player Token</button>
+                        </div>
+                        <button onclick="this.closest('.fixed').remove()" 
+                            class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded w-full mt-2">Cancel</button>
+                    </div>
+                </div>
+            `;
+            document.getElementById('modalContainer').innerHTML = modal;
+        },
+
+        exportToken(isDM) {
+            const char = this.state.characters[this.state.currentCharacter];
+            let data = JSON.parse(JSON.stringify(char));
+
+            if (!isDM) {
+                data.vault = data.vault.map(item => ({
+                    ...item,
+                    stats: item.stats.filter(stat => !stat.locked)
+                }));
+            }
+
+            const token = btoa(JSON.stringify(data));
+            navigator.clipboard.writeText(token).then(() => {
+                alert(`${isDM ? 'DM' : 'Player'} token copied to clipboard!`);
+            });
+        },
+
+        showImportModal() {
+            const modal = `
+                <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+                    <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+                        <h3 class="text-xl font-bold mb-4">Import Token</h3>
+                        <textarea id="importToken" placeholder="Paste token here..." 
+                            class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4 h-32"></textarea>
+                        <div class="flex gap-2">
+                            <button onclick="app.importToken(document.getElementById('importToken').value); this.closest('.fixed').remove();" 
+                                class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">Import</button>
+                            <button onclick="this.closest('.fixed').remove()" 
+                                class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('modalContainer').innerHTML = modal;
+        },
+
+        importToken(token) {
+            try {
+                const data = JSON.parse(atob(token));
+                const id = Date.now().toString();
+                data.id = id;
+                this.state.characters[id] = data;
+                this.state.currentCharacter = id;
+                this.saveState();
+                this.render();
+                alert('Character imported successfully!');
+            } catch (e) {
+                alert('Invalid token!');
+            }
+        },
+
+        render() {
+            this.renderCharacterSelect();
+            this.renderEquipmentSlots();
+            this.renderVault();
+            this.renderTotalStats();
+            this.renderDMToggle();
+            this.renderUndoButton();
+        },
+
+        renderCharacterSelect() {
+            const select = document.getElementById('characterSelect');
+            select.innerHTML = Object.values(this.state.characters)
+                .map(char => `<option value="${char.id}" ${char.id === this.state.currentCharacter ? 'selected' : ''}>${char.name}</option>`)
+                .join('');
+        },
+
+        renderEquipmentSlots() {
+            const char = this.state.characters[this.state.currentCharacter];
+            const container = document.getElementById('equipmentSlots');
+            
+            container.innerHTML = SLOTS.map(slot => {
+                const itemId = char.equipment[slot];
+                const item = itemId ? char.vault.find(i => i.id === itemId) : null;
+                
+                if (item) {
+                    const visibleStats = item.stats.filter(s => this.state.isDMMode || !s.locked);
+                    const hasHiddenStats = item.stats.some(s => s.locked) && !this.state.isDMMode;
+                    
+                    return `
+                        <div class="bg-gray-700 rounded-lg p-4 slot-filled rarity-${item.rarity.toLowerCase().replace(' ', '')}">
+                            <div class="flex justify-between items-start mb-2">
+                                <div>
+                                    <div class="font-bold">${slot}</div>
+                                    <div class="text-sm text-blue-300">${item.name}</div>
+                                    <div class="text-xs text-gray-400">${item.rarity}</div>
+                                </div>
+                                <button onclick="app.unequipItem('${slot}')" 
+                                    class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-sm">Unequip</button>
+                            </div>
+                            ${visibleStats.length > 0 ? `
+                                <div class="text-sm mt-2 space-y-1">
+                                    ${visibleStats.map(s => `<div class="flex justify-between"><span>${s.name}:</span><span class="text-green-400">${s.value}</span></div>`).join('')}
+                                    ${hasHiddenStats ? '<div class="text-xs text-yellow-400 mt-1">🔒 Contains hidden stats</div>' : ''}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                } else {
+                    return `
+                        <div class="bg-gray-700 rounded-lg p-4 slot-empty">
+                            <div class="font-bold text-gray-400">${slot}</div>
+                            <div class="text-sm text-gray-500">Empty</div>
+                        </div>
+                    `;
+                }
+            }).join('');
+        },
+
+        renderVault() {
+            const char = this.state.characters[this.state.currentCharacter];
+            const container = document.getElementById('vaultItems');
+            
+            const unequippedItems = char.vault.filter(item => !item.equipped);
+            
+            if (unequippedItems.length === 0) {
+                container.innerHTML = '<div class="text-gray-500 text-center py-4">No items in vault</div>';
+                return;
+            }
+            
+            container.innerHTML = unequippedItems.map(item => {
+                const visibleStats = item.stats.filter(s => this.state.isDMMode || !s.locked);
+                const hasHiddenStats = item.stats.some(s => s.locked) && !this.state.isDMMode;
+                
+                return `
+                    <div class="bg-gray-700 rounded-lg p-3 rarity-${item.rarity.toLowerCase().replace(' ', '')}">
+                        <div class="flex justify-between items-start mb-2">
+                            <div class="flex-grow">
+                                <div class="font-bold item-name">${item.name}</div>
+                                <div class="text-xs text-gray-400">${item.rarity}</div>
+                            </div>
+                            <div class="flex gap-1">
+                                <button onclick="app.editItem('${item.id}')" 
+                                    class="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs">Edit</button>
+                                <button onclick="app.duplicateItem('${item.id}')" 
+                                    class="bg-yellow-600 hover:bg-yellow-700 px-2 py-1 rounded text-xs">Copy</button>
+                                <button onclick="app.deleteItem('${item.id}')" 
+                                    class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs">Del</button>
+                            </div>
+                        </div>
+                        ${visibleStats.length > 0 ? `
+                            <div class="text-xs space-y-1 mb-2">
+                                ${visibleStats.map(s => `<div class="flex justify-between"><span>${s.name}:</span><span class="text-green-400">${s.value}</span></div>`).join('')}
+                                ${hasHiddenStats ? '<div class="text-xs text-yellow-400 mt-1">🔒 Contains hidden stats</div>' : ''}
+                            </div>
+                        ` : ''}
+                        <select onchange="if(this.value) { app.equipItem('${item.id}', this.value); this.value = ''; }" 
+                            class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
+                            <option value="">Equip to...</option>
+                            ${SLOTS.map(slot => `<option value="${slot}">${slot}</option>`).join('')}
+                        </select>
+                    </div>
+                `;
+            }).join('');
+        },
+
+        renderTotalStats() {
+            const { stats, hasHidden } = this.calculateTotalStats();
+            const container = document.getElementById('totalStats');
+            
+            const entries = Object.entries(stats);
+            
+            if (entries.length === 0) {
+                container.innerHTML = '<div class="col-span-full text-gray-500 text-center py-4">No equipment stats</div>';
+                return;
+            }
+            
+            container.innerHTML = entries.map(([name, value]) => `
+                <div class="bg-gray-700 rounded p-3">
+                    <div class="text-sm text-gray-400">${name}</div>
+                    <div class="text-xl font-bold text-green-400">${value}</div>
+                </div>
+            `).join('') + (hasHidden ? `
+                <div class="col-span-full bg-yellow-900 bg-opacity-30 rounded p-3 text-yellow-400 text-sm text-center">
+                    🔒 Some stats are hidden in Player Mode
+                </div>
+            ` : '');
+        },
+
+        renderDMToggle() {
+            const btn = document.getElementById('dmToggle');
+            if (this.state.isDMMode) {
+                btn.textContent = 'DM Mode';
+                btn.className = 'px-4 py-2 rounded font-semibold bg-red-600 hover:bg-red-700';
+            } else {
+                btn.textContent = 'Player Mode';
+                btn.className = 'px-4 py-2 rounded font-semibold bg-blue-600 hover:bg-blue-700';
+            }
+        },
+
+        renderUndoButton() {
+            const btn = document.getElementById('undoBtn');
+            if (this.state.undoStack.length > 0) {
+                btn.classList.remove('hidden');
+            } else {
+                btn.classList.add('hidden');
+            }
+        }
+    };
+
+    window.onload = () => app.init();
+</script>
+```
+
+</body>
+</html>
