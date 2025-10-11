@@ -256,10 +256,17 @@ const firebaseConfig = {
                 this.state.session.ref = sessionRef;
 
                 // Initial sync
-                this.syncToFirebase();
-
-                this.render();
-                alert(`Session started! Share code with players: ${code}`);
+                sessionRef.set({
+                    characters: this.state.characters,
+                    timestamp: Date.now()
+                }).then(() => {
+                    console.log('Session hosted successfully');
+                    this.render();
+                    alert(`Session started! Share code with players: ${code}`);
+                }).catch(err => {
+                    console.error('Failed to host session:', err);
+                    alert('Failed to host session. Check Firebase config and rules.');
+                });
             },
 
             showJoinModal() {
