@@ -609,16 +609,16 @@
 
       switchCharacter(id) {
         if (!id || !this.state.characters[id]) return;
-        // players can only switch to their claimed char
-        if (this.state.session.active && !this.state.session.isDM &&
-            this.state.session.assignedCharacter &&
-            id !== this.state.session.assignedCharacter) {
-          return;
-        }
+
+        // Players can switch to any character to view it.
+        // Edits are still gated by canEditCurrent / canEditWorldBuffs.
         this.state.currentCharacter = id;
+
+        // This does NOT change assignedCharacter; that remains the claimed one.
         this.saveState();
         this.render();
       },
+
 
       // Item / Buff modals unchanged (use normalizeStat)
 
@@ -1035,22 +1035,24 @@
 
       renderCharacterSelect() {
         const select = document.getElementById('characterSelect');
+        if (!select) return;
+
         const isPlayer = this.state.session.active && !this.state.session.isDM;
+        const assigned = this.state.session.assignedCharacter;
 
-        if (isPlayer && this.state.session.assignedCharacter) {
-          const mine = this.state.session.assignedCharacter;
-          const mineChar = this.state.characters[mine];
-          const others = Object.values(this.state.characters).filter(c => c.id !== mine);
-          select.innerHTML =
-            `<option value="${mine}" selected>${mineChar?.name || 'My Character'}</option>` +
-            others.map(c => `<option value="${c.id}" disabled>👁 ${c.name}</option>`).join('');
-          return;
-        }
+        const options = Object.values(this.state.characters).map(c => {
+          let label = c.name;
+          if (isPlayer && assigned === c.id) {
+            label += ' (You)';
+          }
+          return `<option value="${c.id}" ${c.id === this.state.currentCharacter ? 'selected' : ''}>
+                    ${label}
+                  </option>`;
+        }).join('');
 
-        select.innerHTML = Object.values(this.state.characters)
-          .map(c => `<option value="${c.id}" ${c.id === this.state.currentCharacter ? 'selected' : ''}>${c.name}</option>`)
-          .join('');
+        select.innerHTML = options;
       },
+
 
       renderWorldBuffs() {
         const char = this.state.characters[this.state.currentCharacter] || {};
