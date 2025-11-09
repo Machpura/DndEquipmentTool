@@ -115,6 +115,22 @@
     const SLOTS = ['Head','Amulet','Cloak','Armor','Belt','Gloves','Ring 1','Ring 2','Main Hand','Off Hand','Shield','BootS','Misc 1','Misc 2'];
     const WORLD_BUFF_SLOTS = ['World Buff 1','World Buff 2','World Buff 3'];
     const RARITIES = ['Common','Uncommon','Rare','Very Rare','Legendary','Artifact'];
+    const SLOT_TYPES = [
+  'Any',
+  'Head',
+  'Amulet',
+  'Cloak',
+  'Armor',
+  'Belt',
+  'Gloves',
+  'Ring',
+  'Main Hand',
+  'Off Hand',
+  'Shield',
+  'Boots',
+  'Misc'
+];
+
 
     // Firebase
     const firebaseConfig = {
@@ -152,22 +168,27 @@
       };
     }
 
-    function normalizeItem(item) {
-      if (!item || typeof item !== 'object') {
-        return {
-          id: Date.now().toString(),
-          name: 'Unnamed Item',
-          rarity: 'Common',
-          stats: []
-        };
-      }
-      return {
-        id: item.id || Date.now().toString(),
-        name: item.name || 'Unnamed Item',
-        rarity: item.rarity || 'Common',
-        stats: Array.isArray(item.stats) ? item.stats.map(normalizeStat) : []
-      };
-    }
+function normalizeItem(item) {
+  if (!item || typeof item !== 'object') {
+    return {
+      id: Date.now().toString(),
+      name: 'Unnamed Item',
+      rarity: 'Common',
+      slotType: 'Any',
+      description: '',
+      stats: []
+    };
+  }
+  return {
+    id: item.id || Date.now().toString(),
+    name: item.name || 'Unnamed Item',
+    rarity: item.rarity || 'Common',
+    slotType: item.slotType || 'Any',
+    description: item.description || '',
+    stats: Array.isArray(item.stats) ? item.stats.map(normalizeStat) : []
+  };
+}
+
 
     function normalizeCharacter(char) {
       if (!char || typeof char !== 'object') {
@@ -196,6 +217,26 @@
       });
       return out;
     }
+
+    function getAllowedSlotsForItem(item) {
+  const type = item?.slotType || 'Any';
+  switch (type) {
+    case 'Head':      return ['Head'];
+    case 'Amulet':    return ['Amulet'];
+    case 'Cloak':     return ['Cloak'];
+    case 'Armor':     return ['Armor'];
+    case 'Belt':      return ['Belt'];
+    case 'Gloves':    return ['Gloves'];
+    case 'Ring':      return ['Ring 1', 'Ring 2'];
+    case 'Main Hand': return ['Main Hand'];
+    case 'Off Hand':  return ['Off Hand'];
+    case 'Shield':    return ['Shield'];
+    case 'Boots':     return ['BootS']; // matches your SLOTS entry
+    case 'Misc':      return ['Misc 1', 'Misc 2'];
+    default:          return SLOTS.slice(); // Any slot
+  }
+}
+
 
     // ---------- Permissions ----------
     function canEditCurrent(app) {
@@ -294,6 +335,7 @@
         }
         this.render();
       },
+
 
             // --- Shared helpers for stat rows ---
       addStatRow(containerId) {
@@ -473,12 +515,21 @@
         }).then(() => {
           this.attachSessionListeners();
           this.render();
-          alert(`Session started! Share code: ${code}`);
+
+          if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(code).catch(err => {
+              console.warn('Clipboard copy failed:', err);
+            });
+          }
+
+          alert(`Session started! Share code: ${code} (code copied to clipboard if possible)`);
         }).catch(err => {
-          console.error('Failed to host session:', err);
-          alert('Failed to host session. Check Firebase config & rules.');
+          console.error('Failed to start session', err);
+          alert('Failed to start session. Please try again.');
         });
       },
+
+
 
       showJoinModal() {
         if (!firebaseInitialized) {
@@ -677,19 +728,53 @@
     this.render();
   },
 
+    editBuff(itemId) {
+    if (!canManageBuffs(this)) { alert('Only the DM can edit buffs.'); return; }
+    const buff = this.state.buffVault.find(i => i.id === itemId);
+    if (!buff) return;
+    this.showCreateBuffModal(buff);
+  },
+
+  duplicateBuff(itemId) {
+    if (!canManageBuffs(this)) { alert('Only the DM can duplicate buffs.'); return; }
+    const orig = this.state.buffVault.find(i => i.id === itemId);
+    if (!orig) return;
+    const copy = JSON.parse(JSON.stringify(orig));
+    copy.id = Date.now().toString();
+    copy.name = orig.name + ' (Copy)';
+    this.state.buffVault.push(copy);
+    this.saveState();
+    syncBuffVaultToFirebase(this);
+    this.render();
+  },
+
+  deleteBuff(itemId) {
+    if (!canManageBuffs(this)) { alert('Only the DM can delete buffs.'); return; }
+    const buff = this.state.buffVault.find(i => i.id === itemId);
+    if (buff) this.state.undoStack.push({ type: 'buff', data: buff });
+    this.state.buffVault = this.state.buffVault.filter(i => i.id !== itemId);
+    this.saveState();
+    syncBuffVaultToFirebase(this);
+    this.render();
+  },
+
+
 
       // Item / Buff modals unchanged (use normalizeStat)
 
       showCreateItemModal(existing = null) {
         if (!canManageItems(this)) { alert('Only the DM can manage items.'); return; }
 
-        const isEdit = !!existing;
-        const item = existing || {
-          id: null,
-          name: '',
-          rarity: 'Common',
-          stats: []
-        };
+const isEdit = !!existing;
+const item = existing || {
+  id: null,
+  name: '',
+  rarity: 'Common',
+  slotType: 'Any',
+  description: '',
+  stats: []
+};
+
 
         const statsHtml = (item.stats || []).map(stat => `
           <div class="flex gap-2 items-start stat-row mt-2">
@@ -708,41 +793,61 @@
         `).join('');
 
         const modal = `
-          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto" onclick="this.remove()">
-            <div class="bg-gray-800 rounded-lg p-6 max-w-2xl w-full m-4" onclick="event.stopPropagation()">
-              <h3 class="text-xl font-bold mb-4">${isEdit ? 'Edit Item' : 'Create Item'}</h3>
-              <input type="text" id="itemName" placeholder="Item Name" value="${(item.name || '').replace(/"/g, '&quot;')}"
-                class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
-              <select id="itemRarity" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
-                ${RARITIES.map(r => `<option value="${r}" ${r === item.rarity ? 'selected' : ''}>${r}</option>`).join('')}
-              </select>
-              <div class="mb-4">
-                <div class="flex justify-between items-center mb-2">
-                  <label class="font-semibold">Stats</label>
-                  <button type="button"
-                    class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm"
-                    onclick="app.addStatRow('statsContainer')">
-                    + Add Stat
-                  </button>
-                </div>
-                <div id="statsContainer" class="space-y-2">
-                  ${statsHtml}
-                </div>
-              </div>
-              <div class="flex gap-2">
-                <button type="button"
-                  class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow"
-                  onclick="app.saveItem(${item.id ? `'${item.id}'` : 'null'}); this.closest('.fixed').remove()">
-                  ${isEdit ? 'Save' : 'Create'}
-                </button>
-                <button type="button"
-                  class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded"
-                  onclick="this.closest('.fixed').remove()">
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>`;
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto" onclick="this.remove()">
+    <div class="bg-gray-800 rounded-lg p-6 max-w-2xl w-full m-4" onclick="event.stopPropagation()">
+      <h3 class="text-xl font-bold mb-4">${isEdit ? 'Edit Item' : 'Create Item'}</h3>
+
+      <input type="text" id="itemName" placeholder="Item Name"
+        value="${(item.name || '').replace(/"/g, '&quot;')}"
+        class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+
+      <select id="itemRarity" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+        ${RARITIES.map(r => `<option value="${r}" ${r === item.rarity ? 'selected' : ''}>${r}</option>`).join('')}
+      </select>
+
+      <!-- NEW: slot type -->
+      <label class="block text-sm text-gray-300 mb-1">Item Type / Slot Restriction</label>
+      <select id="itemSlotType" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+        ${SLOT_TYPES.map(t => `
+          <option value="${t}" ${t === (item.slotType || 'Any') ? 'selected' : ''}>${t}</option>
+        `).join('')}
+      </select>
+
+      <!-- NEW: description -->
+      <label class="block text-sm text-gray-300 mb-1">Description (optional)</label>
+      <textarea id="itemDescription"
+        class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4"
+        placeholder="Notes, e.g. Armor: Heavy">${(item.description || '').replace(/</g, '&lt;')}</textarea>
+
+      <div class="mb-4">
+        <div class="flex justify-between items-center mb-2">
+          <label class="font-semibold">Stats</label>
+          <button type="button"
+            class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm"
+            onclick="app.addStatRow('statsContainer')">
+            + Add Stat
+          </button>
+        </div>
+        <div id="statsContainer" class="space-y-2">
+          ${statsHtml}
+        </div>
+      </div>
+
+      <div class="flex gap-2">
+        <button type="button"
+          class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow"
+          onclick="app.saveItem(${item.id ? `'${item.id}'` : 'null'}); this.closest('.fixed').remove()">
+          ${isEdit ? 'Save' : 'Create'}
+        </button>
+        <button type="button"
+          class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded"
+          onclick="this.closest('.fixed').remove()">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>`;
+
         document.getElementById('modalContainer').innerHTML = modal;
       },
 
@@ -752,7 +857,8 @@
 
         const name = document.getElementById('itemName').value || 'Unnamed Item';
         const rarity = document.getElementById('itemRarity').value || 'Common';
-
+        const slotType = document.getElementById('itemSlotType').value || 'Any';
+        const description = document.getElementById('itemDescription').value || '';
         const rows = document.querySelectorAll('#statsContainer .stat-row');
         const stats = [];
         rows.forEach(row => {
@@ -768,6 +874,8 @@
           id: itemId || Date.now().toString(),
           name,
           rarity,
+          slotType,
+          description,
           stats
         });
 
@@ -886,10 +994,21 @@
         if (isWorldBuff) {
           if (!canEditWorldBuffs(this)) { alert('You can only equip buffs on your own character.'); return; }
           char.worldBuffs[slot] = itemId;
-        } else {
-          if (!canEditCurrent(this)) { alert('You can only equip items on your own character.'); return; }
-          char.equipment[slot] = itemId;
-        }
+} else {
+  if (!canEditCurrent(this)) { alert('You can only equip items on your own character.'); return; }
+
+  const item = this.state.itemVault.find(i => i.id === itemId);
+  if (item) {
+    const allowed = getAllowedSlotsForItem(item);
+    if (!allowed.includes(slot)) {
+      alert('That item cannot be equipped in this slot.');
+      return;
+    }
+  }
+
+  char.equipment[slot] = itemId;
+}
+
 
         this.saveState();
         if (this.state.session.active) {
@@ -1173,55 +1292,73 @@
         }).join('');
       },
 
-      renderEquipmentSlots() {
-        const char = this.state.characters[this.state.currentCharacter] || {};
-        const container = document.getElementById('equipmentSlots');
-        const equip = char.equipment || {};
-        const canEdit = canEditCurrent(this);
+ renderEquipmentSlots() {
+  const char = this.state.characters[this.state.currentCharacter] || {};
+  const container = document.getElementById('equipmentSlots');
+  const equip = char.equipment || {};
+  const canEdit = canEditCurrent(this);
 
-        container.innerHTML = SLOTS.map(slot => {
-          const itemId = equip[slot];
-          const item =
-            itemId &&
-            (this.state.itemVault.find(i => i.id === itemId) ||
-             this.state.buffVault.find(i => i.id === itemId));
-          if (item) {
-            const visibleStats = (item.stats || []).filter(s =>
-              this.state.session.isDM || !s.locked
-            );
-            return `
-              <div class="bg-gray-700 rounded-lg p-4 slot-filled rarity-${(item.rarity || 'Common').toLowerCase().replace(' ','')}">
-                <div class="flex justify-between items-start mb-2">
-                  <div>
-                    <div class="font-bold">${slot}</div>
-                    <div class="text-sm text-blue-300 item-name">${item.name}</div>
-                    <div class="text-xs text-gray-400">${item.rarity}</div>
-                  </div>
-                  ${canEdit ? `<button onclick="app.unequipItem('${slot}')" class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-sm">Unequip</button>` : ''}
-                </div>
-                ${visibleStats.length ? `
-                  <div class="text-sm mt-2 space-y-1">
-                    ${visibleStats.map(s =>
-                      `<div><span class="font-semibold">${s.name}:</span> <span class="text-green-400 whitespace-pre-wrap">${s.description}</span></div>`
-                    ).join('')}
-                  </div>` : ''
-                }
-              </div>`;
-          } else {
-            return `
-              <div class="bg-gray-700 rounded-lg p-4 slot-empty">
-                <div class="font-bold text-gray-400">${slot}</div>
-                <div class="text-sm text-gray-500 mb-2">Empty</div>
-                ${canEdit ? `
-                  <select onchange="if(this.value){ app.equipItem(this.value, '${slot}'); this.value=''; }" class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
-                    <option value="">Equip from Item Vault...</option>
-                    ${this.state.itemVault.map(v => `<option value="${v.id}">${v.name}</option>`).join('')}
-                  </select>` : ''
-                }
-              </div>`;
+  container.innerHTML = SLOTS.map(slot => {
+    const itemId = equip[slot];
+    const item =
+      itemId &&
+      (this.state.itemVault.find(i => i.id === itemId) ||
+       this.state.buffVault.find(i => i.id === itemId));
+    if (item) {
+      const visibleStats = (item.stats || []).filter(s =>
+        this.state.session.isDM || !s.locked
+      );
+      return `
+        <div class="bg-gray-700 rounded-lg p-4 slot-filled rarity-${(item.rarity || 'Common').toLowerCase().replace(' ','')}">
+          <div class="flex justify-between items-start mb-2">
+            <div>
+              <div class="font-bold">${slot}</div>
+              <div class="text-sm text-blue-300 item-name">${item.name}</div>
+              <div class="text-xs text-gray-400">${item.rarity}</div>
+
+              ${item.slotType && item.slotType !== 'Any'
+                ? `<div class="text-[10px] text-blue-300 uppercase tracking-wide mt-1">
+                     Type: ${item.slotType}
+                   </div>`
+                : ''}
+
+              ${item.description
+                ? `<div class="text-xs text-gray-300 whitespace-pre-wrap mt-1">
+                     ${item.description}
+                   </div>`
+                : ''}
+            </div>
+            ${canEdit
+              ? `<button onclick="app.unequipItem('${slot}')"
+                  class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-sm">Unequip</button>`
+              : ''}
+          </div>
+          ${visibleStats.length ? `
+            <div class="text-sm mt-2 space-y-1">
+              ${visibleStats.map(s =>
+                `<div><span class="font-semibold">${s.name}:</span>
+                 <span class="text-green-400 whitespace-pre-wrap">${s.description}</span></div>`
+              ).join('')}
+            </div>` : ''
           }
-        }).join('');
-      },
+        </div>`;
+    } else {
+      return `
+        <div class="bg-gray-700 rounded-lg p-4 slot-empty">
+          <div class="font-bold text-gray-400">${slot}</div>
+          <div class="text-sm text-gray-500 mb-2">Empty</div>
+          ${canEdit ? `
+            <select onchange="if(this.value){ app.equipItem(this.value, '${slot}'); this.value=''; }"
+              class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
+              <option value="">Equip from Item Vault...</option>
+              ${this.state.itemVault.map(v => `<option value="${v.id}">${v.name}</option>`).join('')}
+            </select>` : ''
+          }
+        </div>`;
+    }
+  }).join('');
+},
+
 
       renderItemVault() {
         const container = document.getElementById('vaultItems');
@@ -1249,43 +1386,53 @@
           !this.state.session.active ||
           canEditCurrent(this);
 
-        container.innerHTML = visibleItems.map(item => {
-          const visibleStats = (item.stats || []).filter(s =>
-            this.state.session.isDM || !s.locked
-          );
-          return `
-            <div class="bg-gray-700 rounded-lg p-3 rarity-${(item.rarity || 'Common').toLowerCase().replace(' ','')}">
-              <div class="flex justify-between items-start mb-2">
-                <div class="flex-grow">
-                  <div class="font-bold item-name">${item.name}</div>
-                  <div class="text-xs text-gray-400">${item.rarity}</div>
-                </div>
-                ${isDM ? `
-                  <div class="flex gap-1">
-                    <button onclick="app.editItem('${item.id}')"
-                      class="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs">Edit</button>
-                    <button onclick="app.duplicateItem('${item.id}')"
-                      class="bg-yellow-600 hover:bg-yellow-700 px-2 py-1 rounded text-xs">Copy</button>
-                    <button onclick="app.deleteItem('${item.id}')"
-                      class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs">Del</button>
-                  </div>` : ''
-                }
-              </div>
-              ${visibleStats.length ? `
-                <div class="text-xs space-y-1 mb-2">
-                  ${visibleStats.map(s =>
-                    `<div><span class="font-semibold">${s.name}:</span> <span class="text-green-400 whitespace-pre-wrap">${s.description}</span></div>`
-                  ).join('')}
-                </div>` : ''
-              }
-              ${canEquipHere ? `
-                <select onchange="if(this.value){ app.equipItem('${item.id}', this.value); this.value=''; }" class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
-                  <option value="">Equip to...</option>
-                  ${SLOTS.map(s => `<option value="${s}">${s}</option>`).join('')}
-                </select>` : ''
-              }
-            </div>`;
-        }).join('');
+container.innerHTML = visibleItems.map(item => {
+  const visibleStats = (item.stats || []).filter(s =>
+    this.state.session.isDM || !s.locked
+  );
+  return `
+    <div class="bg-gray-700 rounded-lg p-3 rarity-${(item.rarity || 'Common').toLowerCase().replace(' ','')}">
+      <div class="flex justify-between items-start mb-2">
+        <div class="flex-grow">
+          <div class="font-bold item-name">${item.name}</div>
+          <div class="text-xs text-gray-400">${item.rarity}</div>
+          ${item.slotType && item.slotType !== 'Any'
+            ? `<div class="text-[10px] text-blue-300 uppercase tracking-wide">Type: ${item.slotType}</div>`
+            : ''
+          }
+          ${item.description
+            ? `<div class="text-xs text-gray-300 whitespace-pre-wrap mb-1">${item.description}</div>`
+            : ''
+          }
+        </div>
+        ${isDM ? `
+          <div class="flex gap-1">
+            <button onclick="app.editItem('${item.id}')"
+              class="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs">Edit</button>
+            <button onclick="app.duplicateItem('${item.id}')"
+              class="bg-yellow-600 hover:bg-yellow-700 px-2 py-1 rounded text-xs">Copy</button>
+            <button onclick="app.deleteItem('${item.id}')"
+              class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs">Del</button>
+          </div>` : ''
+        }
+      </div>
+      ${visibleStats.length ? `
+        <div class="text-xs space-y-1 mb-2">
+          ${visibleStats.map(s =>
+            `<div><span class="font-semibold">${s.name}:</span> <span class="text-green-400 whitespace-pre-wrap">${s.description}</span></div>`
+          ).join('')}
+        </div>` : ''
+      }
+      ${canEquipHere ? `
+        <select onchange="if(this.value){ app.equipItem('${item.id}', this.value); this.value=''; }"
+          class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
+          <option value="">Equip to...</option>
+          ${getAllowedSlotsForItem(item).map(s => `<option value="${s}">${s}</option>`).join('')}
+        </select>` : ''
+      }
+    </div>`;
+}).join('');
+
       },
 
       renderBuffVault() {
