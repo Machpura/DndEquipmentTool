@@ -190,24 +190,51 @@ function normalizeItem(item) {
 }
 
 
-    function normalizeCharacter(char) {
-      if (!char || typeof char !== 'object') {
-        return {
-          id: Date.now().toString(),
-          name: 'Unnamed Character',
-          equipment: {},
-          worldBuffs: {}
-        };
-      }
-      const equipment = (char.equipment && typeof char.equipment === 'object') ? { ...char.equipment } : {};
-      const worldBuffs = (char.worldBuffs && typeof char.worldBuffs === 'object') ? { ...char.worldBuffs } : {};
-      return {
-        id: char.id || Date.now().toString(),
-        name: char.name || 'Unnamed Character',
-        equipment,
-        worldBuffs
+function normalizeCharacter(char) {
+  if (!char || typeof char !== 'object') {
+    return {
+      id: Date.now().toString(),
+      name: 'Unnamed Character',
+      equipment: {},
+      worldBuffs: {}
+    };
+  }
+
+  const equipment =
+    (char.equipment && typeof char.equipment === 'object')
+      ? { ...char.equipment }
+      : {};
+
+  const rawWorldBuffs =
+    (char.worldBuffs && typeof char.worldBuffs === 'object')
+      ? char.worldBuffs
+      : {};
+
+  const worldBuffs = {};
+  Object.entries(rawWorldBuffs).forEach(([slot, value]) => {
+    if (!value) return;
+    if (typeof value === 'string') {
+      // old format: just the buff id
+      worldBuffs[slot] = { id: value, source: '' };
+    } else if (typeof value === 'object') {
+      // new / mixed format
+      const id = value.id || value.buffId || value.itemId || '';
+      if (!id) return;
+      worldBuffs[slot] = {
+        id,
+        source: value.source || value.note || ''
       };
     }
+  });
+
+  return {
+    id: char.id || Date.now().toString(),
+    name: char.name || 'Unnamed Character',
+    equipment,
+    worldBuffs
+  };
+}
+
 
     function normalizeAllCharacters(chars) {
       const out = {};
@@ -893,20 +920,35 @@ const item = existing || {
 
       // Buff creation/edit is similar; omitted here to keep tight; same pattern as saveItem using buffVault
       showCreateBuffModal(existing = null) {
-        if (!canManageBuffs(this)) { alert('Only the DM can manage buffs.'); return; }
+        if (!canManageBuffs(this)) {
+          alert('Only the DM can manage buffs.');
+          return;
+        }
+
         const isEdit = !!existing;
-        const item = existing || { name:'', rarity:'Common', stats:[{ name:'', description:'', locked:false }] };
+        const item = existing || {
+          id: null,
+          name: '',
+          rarity: 'Common',
+          stats: []
+        };
 
         const statsHtml = (item.stats || []).map(stat => `
-          <div class="flex gap-2 items-start stat-row">
-            <input type="text" placeholder="Stat name" value="${stat.name || ''}" class="bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name">
-            <textarea placeholder="Description / Value (multiline OK)" class="bg-gray-700 text-white px-3 py-2 rounded w-full stat-desc">${stat.description || ''}</textarea>
-            <button class="bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded"
-              onclick="(function(btn){ const h=btn.nextElementSibling; h.value = h.value === 'true' ? 'false' : 'true'; btn.textContent = h.value === 'true' ? '🔒' : '🔓'; })(this)">
-              ${stat.locked ? '🔒' : '🔓'}
-            </button>
+          <div class="flex gap-2 items-start stat-row mt-2">
+            <input type="text"
+              placeholder="Stat name"
+              value="${(stat.name || '').replace(/"/g, '&quot;')}"
+              class="bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name">
+            <textarea
+              placeholder="Description / Value (multiline OK)"
+              class="bg-gray-700 text-white px-3 py-2 rounded w-full stat-desc">${(stat.description || '').replace(/</g, '&lt;')}</textarea>
+            <button type="button"
+              class="bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded"
+              onclick="app.toggleLock(this)">${stat.locked ? '🔒' : '🔓'}</button>
             <input type="hidden" class="stat-locked" value="${stat.locked ? 'true' : 'false'}">
-            <button onclick="this.closest('.stat-row').remove()" class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded">✕</button>
+            <button type="button"
+              onclick="this.closest('.stat-row').remove()"
+              class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded">✕</button>
           </div>
         `).join('');
 
@@ -914,37 +956,37 @@ const item = existing || {
           <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto" onclick="this.remove()">
             <div class="bg-gray-800 rounded-lg p-6 max-w-2xl w-full m-4" onclick="event.stopPropagation()">
               <h3 class="text-xl font-bold mb-4">${isEdit ? 'Edit Buff' : 'Create Buff'}</h3>
-              <input type="text" id="buffName" placeholder="Buff Name" value="${item.name || ''}" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+
+              <input type="text" id="buffName" placeholder="Buff Name"
+                value="${(item.name || '').replace(/"/g, '&quot;')}"
+                class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+
               <select id="buffRarity" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
-                ${RARITIES.map(r => `<option value="${r}" ${r === item.rarity ? 'selected' : ''}>${r}</option>`).join('')}
+                ${RARITIES.map(r => `<option value="${r}" ${r === (item.rarity || 'Common') ? 'selected' : ''}>${r}</option>`).join('')}
               </select>
+
               <div class="mb-4">
                 <div class="flex justify-between items-center mb-2">
                   <label class="font-semibold">Stats</label>
-                  <button class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm"
-                    onclick="(function(){
-                      const c=document.getElementById('buffStatsContainer');
-                      c.insertAdjacentHTML('beforeend', \`
-                        <div class='flex gap-2 items-start stat-row mt-2'>
-                          <input type='text' placeholder='Stat name' class='bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name'>
-                          <textarea placeholder='Description / Value (multiline OK)' class='bg-gray-700 text-white px-3 py-2 rounded w-full stat-desc'></textarea>
-                          <button class='bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded'
-                            onclick="(function(btn){ const h=btn.nextElementSibling; h.value = h.value === 'true' ? 'false' : 'true'; btn.textContent = h.value === 'true' ? '🔒' : '🔓'; })(this)">🔓</button>
-                          <input type='hidden' class='stat-locked' value='false'>
-                          <button onclick='this.closest(\\'.stat-row\\').remove()' class='bg-red-600 hover:bg-red-700 px-3 py-2 rounded'>✕</button>
-                        </div>\`);
-                    })()">
+                  <button type="button"
+                    class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm"
+                    onclick="app.addStatRow('buffStatsContainer')">
                     + Add Stat
                   </button>
                 </div>
-                <div id="buffStatsContainer" class="space-y-2">${statsHtml}</div>
+                <div id="buffStatsContainer" class="space-y-2">
+                  ${statsHtml}
+                </div>
               </div>
+
               <div class="flex gap-2">
-                <button class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow"
-                  onclick="app.saveBuff(${isEdit ? `'${item.id}'` : 'null'}); this.closest('.fixed').remove()">
+                <button type="button"
+                  class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow"
+                  onclick="app.saveBuff(${item.id ? `'${item.id}'` : 'null'}); this.closest('.fixed').remove()">
                   ${isEdit ? 'Save' : 'Create'}
                 </button>
-                <button class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded"
+                <button type="button"
+                  class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded"
                   onclick="this.closest('.fixed').remove()">
                   Cancel
                 </button>
@@ -955,21 +997,32 @@ const item = existing || {
       },
 
       saveBuff(itemId) {
-        if (!canManageBuffs(this)) { alert('Only the DM can manage buffs.'); return; }
+        if (!canManageBuffs(this)) {
+          alert('Only the DM can manage buffs.');
+          return;
+        }
+
         const name = document.getElementById('buffName').value || 'Unnamed Buff';
         const rarity = document.getElementById('buffRarity').value || 'Common';
-        const rows = document.querySelectorAll('.stat-row');
+
+        // IMPORTANT: only read rows inside this modal
+        const rows = document.querySelectorAll('#buffStatsContainer .stat-row');
         const stats = [];
         rows.forEach(row => {
           const n = row.querySelector('.stat-name')?.value || '';
           const d = row.querySelector('.stat-desc')?.value || '';
           const l = row.querySelector('.stat-locked')?.value === 'true';
-          if (n.trim() || d.trim()) stats.push(normalizeStat({ name: n, description: d, locked: l }));
+          if (n.trim() || d.trim()) {
+            stats.push(normalizeStat({ name: n, description: d, locked: l }));
+          }
         });
+
         const itemData = normalizeItem({
           id: itemId || Date.now().toString(),
           name,
           rarity,
+          // buffs don’t need slotType/description for world buff behavior,
+          // but normalizeItem will fill defaults safely.
           stats
         });
 
@@ -979,6 +1032,7 @@ const item = existing || {
         } else {
           this.state.buffVault.push(itemData);
         }
+
         this.saveState();
         syncBuffVaultToFirebase(this);
         this.render();
@@ -991,10 +1045,19 @@ const item = existing || {
 
         const isWorldBuff = WORLD_BUFF_SLOTS.includes(slot);
 
-        if (isWorldBuff) {
-          if (!canEditWorldBuffs(this)) { alert('You can only equip buffs on your own character.'); return; }
-          char.worldBuffs[slot] = itemId;
+if (isWorldBuff) {
+  if (!canEditWorldBuffs(this)) {
+    alert('You can only equip buffs on your own character.');
+    return;
+  }
+  const existing = char.worldBuffs[slot];
+  const prevSource =
+    existing && typeof existing === 'object'
+      ? (existing.source || '')
+      : '';
+  char.worldBuffs[slot] = { id: itemId, source: prevSource };
 } else {
+
   if (!canEditCurrent(this)) { alert('You can only equip items on your own character.'); return; }
 
   const item = this.state.itemVault.find(i => i.id === itemId);
@@ -1064,6 +1127,31 @@ const item = existing || {
         this.saveState();
         this.render();
       },
+
+            updateWorldBuffSource(slot, value) {
+        const char = this.state.characters[this.state.currentCharacter];
+        if (!char) return;
+        if (!canEditWorldBuffs(this)) return;
+
+        const entry = char.worldBuffs?.[slot];
+        if (!entry) return;
+
+        if (typeof entry === 'string') {
+          char.worldBuffs[slot] = { id: entry, source: value };
+        } else {
+          entry.source = value;
+        }
+
+        this.saveState();
+        if (this.state.session.active) {
+          const targetId = this.state.session.isDM
+            ? this.state.currentCharacter
+            : this.state.session.assignedCharacter || this.state.currentCharacter;
+          syncCharacterToFirebase(this, targetId);
+        }
+        this.render();
+      },
+
 
       // Export / Import as JSON file, backward compatible with old token
       showExportModal() {
@@ -1202,8 +1290,13 @@ const item = existing || {
           });
         };
 
-        Object.values(char.equipment || {}).forEach(applyItem);
-        Object.values(char.worldBuffs || {}).forEach(applyItem);
+Object.values(char.equipment || {}).forEach(applyItem);
+
+Object.values(char.worldBuffs || {}).forEach(entry => {
+  const id = typeof entry === 'string' ? entry : entry?.id;
+  if (id) applyItem(id);
+});
+
 
         return { stats: totals, hasHidden };
       },
@@ -1249,11 +1342,15 @@ const item = existing || {
         const canEdit = canEditWorldBuffs(this);
 
         container.innerHTML = WORLD_BUFF_SLOTS.map(slot => {
-          const itemId = buffs[slot];
-          const item =
-            itemId &&
-            (this.state.buffVault.find(i => i.id === itemId) ||
-             this.state.itemVault.find(i => i.id === itemId));
+ const entry = buffs[slot];
+const buffId = typeof entry === 'string' ? entry : entry?.id;
+const source = (entry && typeof entry === 'object' && entry.source) ? entry.source : '';
+
+const item =
+  buffId &&
+  (this.state.buffVault.find(i => i.id === buffId) ||
+   this.state.itemVault.find(i => i.id === buffId));
+
           if (item) {
             const visibleStats = (item.stats || []).filter(s =>
               this.state.session.isDM || !s.locked
@@ -1268,14 +1365,29 @@ const item = existing || {
                   </div>
                   ${canEdit ? `<button onclick="app.unequipItem('${slot}')" class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-sm">Unequip</button>` : ''}
                 </div>
-                ${visibleStats.length ? `
+                 ${visibleStats.length ? `
                   <div class="text-sm mt-2 space-y-1">
                     ${visibleStats.map(s =>
                       `<div><span class="font-semibold">${s.name}:</span> <span class="text-green-400 whitespace-pre-wrap">${s.description}</span></div>`
                     ).join('')}
                   </div>` : ''
                 }
+
+                <div class="mt-3">
+                  <div class="text-xs text-gray-400 mb-1">Source</div>
+                  ${
+                    canEdit
+                      ? `<input type="text"
+                           class="w-full bg-gray-800 text-white text-xs px-2 py-1 rounded"
+                           placeholder="Where did this buff come from?"
+                           value="${(source || '').replace(/"/g, '&quot;')}"
+                           onblur="app.updateWorldBuffSource('${slot}', this.value)">
+                         `
+                      : `<div class="text-xs text-gray-300 italic">${source ? source.replace(/</g, '&lt;') : '—'}</div>`
+                  }
+                </div>
               </div>`;
+
           } else {
             return `
               <div class="bg-gray-700 rounded-lg p-4 slot-empty">
