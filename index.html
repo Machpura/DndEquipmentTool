@@ -1,724 +1,1342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>D&D 5e Equipment Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <style>
+    .rarity-common { border-left: 4px solid #9ca3af; }
+    .rarity-uncommon { border-left: 4px solid #10b981; }
+    .rarity-rare { border-left: 4px solid #3b82f6; }
+    .rarity-veryrare { border-left: 4px solid #8b5cf6; }
+    .rarity-legendary { border-left: 4px solid #f59e0b; }
+    .rarity-artifact { border-left: 4px solid #ef4444; }
+    .slot-empty { border: 2px dashed #d1d5db; }
+    .slot-filled { border: 2px solid #3b82f6; }
+    .pulse-online { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+  <div id="app" class="container mx-auto p-4 max-w-7xl">
+    <!-- Header -->
+    <div class="bg-gray-800 rounded-lg p-4 mb-6">
+      <div class="flex justify-between items-center mb-4">
+        <h1 class="text-3xl font-bold text-blue-400">D&D 5e Equipment Tracker</h1>
+        <div id="sessionStatus" class="flex items-center gap-2">
+          <span class="text-sm text-gray-400">Offline</span>
+        </div>
+      </div>
 
-import React, { useState, useEffect } from 'react';
-import { Download, Upload, Eye, EyeOff, Plus, X, Lock, Unlock, Copy, Trash2, Search, User } from 'lucide-react';
+      <!-- Session Controls -->
+      <div id="sessionControls" class="flex gap-4 items-center flex-wrap">
+        <button onclick="app.showHostModal()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded">🎲 Host Session (DM)</button>
+        <button onclick="app.showJoinModal()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">👥 Join Session (Player)</button>
+        <button onclick="app.showExportModal()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded">💾 Export Backup</button>
+        <button onclick="app.showImportModal()" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded">📥 Import Backup</button>
+      </div>
 
-const EQUIPMENT_SLOTS = [
-  'Head', 'Amulet', 'Cloak', 'Armor', 'Belt',
-  'Gloves', 'Ring 1', 'Ring 2', 'Main Hand', 'Off Hand',
-  'Shield', 'Boots', 'Misc 1', 'Misc 2'
-];
+      <!-- Active Session Info -->
+      <div id="activeSessionInfo" class="hidden mt-4 p-4 bg-gray-700 rounded-lg">
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="text-sm text-gray-400">Session Code</div>
+            <div class="text-2xl font-bold text-green-400" id="sessionCode">------</div>
+          </div>
+          <button onclick="app.disconnectSession()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded">Disconnect</button>
+        </div>
+      </div>
+    </div>
 
-const RARITIES = [
-  { name: 'Common', color: 'text-gray-400' },
-  { name: 'Uncommon', color: 'text-green-400' },
-  { name: 'Rare', color: 'text-blue-400' },
-  { name: 'Very Rare', color: 'text-purple-400' },
-  { name: 'Legendary', color: 'text-orange-400' },
-  { name: 'Artifact', color: 'text-red-400' }
-];
+    <!-- Character Selection -->
+    <div class="bg-gray-800 rounded-lg p-4 mb-6">
+      <div class="flex gap-4 items-center flex-wrap">
+        <select id="characterSelect" onchange="app.switchCharacter(this.value)" class="bg-gray-700 text-white px-4 py-2 rounded flex-grow"></select>
+        <button onclick="app.showCreateCharacterModal()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded" id="newCharBtn">New Character</button>
+        <button onclick="app.cloneCharacter()" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded" id="cloneCharBtn">Clone</button>
+        <button onclick="app.deleteCharacter()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded" id="deleteCharBtn">Delete</button>
+        <button onclick="app.undo()" id="undoBtn" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded hidden">Undo Delete</button>
+      </div>
+    </div>
 
-export default function DNDEquipmentTracker() {
-  const [characters, setCharacters] = useState([]);
-  const [currentCharacterId, setCurrentCharacterId] = useState(null);
-  const [items, setItems] = useState([]);
-  const [isDMMode, setIsDMMode] = useState(true);
-  const [showCharacterModal, setShowCharacterModal] = useState(false);
-  const [showItemModal, setShowItemModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [itemSearch, setItemSearch] = useState('');
-  const [editingItem, setEditingItem] = useState(null);
+    <!-- World Buffs -->
+    <div class="bg-gray-800 rounded-lg p-6 mb-6">
+      <h2 class="text-2xl font-bold mb-4 text-blue-300">World Buffs</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="worldBuffs"></div>
+    </div>
 
-  const [newCharacter, setNewCharacter] = useState({
-    name: '',
-    class: '',
-    level: 1,
-    race: '',
-    notes: ''
-  });
+    <!-- Main Content -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Equipment & Stats -->
+      <div class="lg:col-span-2">
+        <div class="bg-gray-800 rounded-lg p-6">
+          <h2 class="text-2xl font-bold mb-4 text-blue-300">Equipment Slots</h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="equipmentSlots"></div>
+        </div>
 
-  const [newItem, setNewItem] = useState({
-    name: '',
-    description: '',
-    rarity: 'Common',
-    stats: [{ name: '', value: '', locked: false }]
-  });
+        <div class="bg-gray-800 rounded-lg p-6 mt-6">
+          <h2 class="text-2xl font-bold mb-4 text-blue-300">Total Stats</h2>
+          <div id="totalStats" class="grid grid-cols-2 md:grid-cols-3 gap-3"></div>
+        </div>
+      </div>
 
-  const currentCharacter = characters.find(c => c.id === currentCharacterId);
+      <!-- Right Column: Vaults -->
+      <div class="flex flex-col min-h-[32rem]">
+        <!-- Item Vault -->
+        <div class="bg-gray-800 rounded-lg p-6 mb-6">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-2xl font-bold text-blue-300">Item Vault (Shared)</h2>
+            <button onclick="app.showCreateItemModal()" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm" id="addItemBtn">+ Add Item</button>
+          </div>
+          <input type="text" id="vaultSearchItems" oninput="app.filterItemVault(this.value)" placeholder="Search items..." class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+          <div id="vaultItems" class="space-y-2 max-h-72 overflow-y-auto"></div>
+        </div>
 
-  useEffect(() => {
-    const saved = localStorage.getItem('dndEquipmentData');
-    if (saved) {
-      const data = JSON.parse(saved);
-      setCharacters(data.characters || []);
-      setItems(data.items || []);
-      if (data.characters?.length > 0) {
-        setCurrentCharacterId(data.characters[0].id);
+        <!-- Buff Vault -->
+        <div class="bg-gray-800 rounded-lg p-6 flex-1 min-h-0">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-2xl font-bold text-blue-300">Buff Vault</h2>
+            <button onclick="app.showCreateBuffModal()" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm" id="addBuffBtn">+ Add Buff</button>
+          </div>
+          <input type="text" id="vaultSearchBuffs" oninput="app.filterBuffVault(this.value)" placeholder="Search buffs..." class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+          <div id="vaultBuffs" class="space-y-2 h-full overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modals -->
+  <div id="modalContainer"></div>
+
+  <script>
+    const SLOTS = ['Head','Amulet','Cloak','Armor','Belt','Gloves','Ring 1','Ring 2','Main Hand','Off Hand','Shield','BootS','Misc 1','Misc 2'];
+    const WORLD_BUFF_SLOTS = ['World Buff 1','World Buff 2','World Buff 3'];
+    const RARITIES = ['Common','Uncommon','Rare','Very Rare','Legendary','Artifact'];
+
+    // Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyBuVrJKcWVpxqSSVAzeVSnFAggRmlcPHao",
+      authDomain: "dndequipmenttool.firebaseapp.com",
+      projectId: "dndequipmenttool",
+      storageBucket: "dndequipmenttool.firebasestorage.app",
+      messagingSenderId: "237918823599",
+      appId: "1:237918823599:web:d4da5bd6148532a544605a"
+    };
+    let firebaseInitialized = false;
+    try {
+      firebase.initializeApp(firebaseConfig);
+      firebaseInitialized = true;
+    } catch {
+      console.warn('Firebase not configured or already initialized. Using offline mode only.');
+    }
+
+    // ---------- Normalizers ----------
+    function normalizeStat(stat) {
+      const name = (stat?.name || '').trim();
+      const descSource = stat?.description ?? stat?.value ?? '';
+      const description = String(descSource);
+
+      // pull a numeric chunk if present (supports "5", "+5", "AC +2", etc.)
+      const rawForNumber = stat?.value ?? stat?.description ?? '';
+      const numMatch = String(rawForNumber).match(/[-+]?\d*\.?\d+/);
+      const value = numMatch ? parseFloat(numMatch[0]) : null;
+
+      return {
+        name,
+        description,
+        value,
+        locked: !!stat?.locked
+      };
+    }
+
+    function normalizeItem(item) {
+      if (!item || typeof item !== 'object') {
+        return {
+          id: Date.now().toString(),
+          name: 'Unnamed Item',
+          rarity: 'Common',
+          stats: []
+        };
       }
+      return {
+        id: item.id || Date.now().toString(),
+        name: item.name || 'Unnamed Item',
+        rarity: item.rarity || 'Common',
+        stats: Array.isArray(item.stats) ? item.stats.map(normalizeStat) : []
+      };
     }
-  }, []);
 
-  useEffect(() => {
-    if (characters.length > 0 || items.length > 0) {
-      localStorage.setItem('dndEquipmentData', JSON.stringify({ characters, items }));
+    function normalizeCharacter(char) {
+      if (!char || typeof char !== 'object') {
+        return {
+          id: Date.now().toString(),
+          name: 'Unnamed Character',
+          equipment: {},
+          worldBuffs: {}
+        };
+      }
+      const equipment = (char.equipment && typeof char.equipment === 'object') ? { ...char.equipment } : {};
+      const worldBuffs = (char.worldBuffs && typeof char.worldBuffs === 'object') ? { ...char.worldBuffs } : {};
+      return {
+        id: char.id || Date.now().toString(),
+        name: char.name || 'Unnamed Character',
+        equipment,
+        worldBuffs
+      };
     }
-  }, [characters, items]);
 
-  const createCharacter = () => {
-    if (!newCharacter.name) return;
-    const character = {
-      id: Date.now().toString(),
-      ...newCharacter,
-      equipment: {}
-    };
-    setCharacters([...characters, character]);
-    setCurrentCharacterId(character.id);
-    setNewCharacter({ name: '', class: '', level: 1, race: '', notes: '' });
-    setShowCharacterModal(false);
-  };
-
-  const deleteCharacter = (id) => {
-    const filtered = characters.filter(c => c.id !== id);
-    setCharacters(filtered);
-    if (currentCharacterId === id) {
-      setCurrentCharacterId(filtered[0]?.id || null);
+    function normalizeAllCharacters(chars) {
+      const out = {};
+      if (!chars || typeof chars !== 'object') return out;
+      Object.entries(chars).forEach(([id, c]) => {
+        out[id] = normalizeCharacter({ id, ...c });
+      });
+      return out;
     }
-  };
 
-  const cloneCharacter = (character) => {
-    const cloned = {
-      ...character,
-      id: Date.now().toString(),
-      name: `${character.name} (Copy)`
-    };
-    setCharacters([...characters, cloned]);
-  };
-
-  const createItem = () => {
-    if (!newItem.name) return;
-    const item = {
-      id: Date.now().toString(),
-      ...newItem,
-      stats: newItem.stats.filter(s => s.name && s.value)
-    };
-    if (editingItem) {
-      setItems(items.map(i => i.id === editingItem.id ? item : i));
-    } else {
-      setItems([...items, item]);
+    // ---------- Permissions ----------
+    function canEditCurrent(app) {
+      if (app.state.session.isDM) return true;
+      if (!app.state.session.active) return true;
+      return app.state.session.assignedCharacter &&
+             app.state.currentCharacter === app.state.session.assignedCharacter;
     }
-    resetItemForm();
-  };
 
-  const resetItemForm = () => {
-    setNewItem({
-      name: '',
-      description: '',
-      rarity: 'Common',
-      stats: [{ name: '', value: '', locked: false }]
-    });
-    setEditingItem(null);
-    setShowItemModal(false);
-  };
+    function canEditWorldBuffs(app) {
+      return canEditCurrent(app);
+    }
 
-  const editItem = (item) => {
-    setEditingItem(item);
-    setNewItem({
-      ...item,
-      stats: item.stats.length > 0 ? [...item.stats] : [{ name: '', value: '', locked: false }]
-    });
-    setShowItemModal(true);
-  };
+    function canManageItems(app) {
+      return app.state.session.isDM || !app.state.session.active;
+    }
 
-  const duplicateItem = (item) => {
-    const duplicated = {
-      ...item,
-      id: Date.now().toString(),
-      name: `${item.name} (Copy)`
-    };
-    setItems([...items, duplicated]);
-  };
+    function canManageBuffs(app) {
+      return app.state.session.isDM || !app.state.session.active;
+    }
 
-  const deleteItem = (id) => {
-    setItems(items.filter(i => i.id !== id));
-    setCharacters(characters.map(c => ({
-      ...c,
-      equipment: Object.fromEntries(
-        Object.entries(c.equipment).filter(([_, itemId]) => itemId !== id)
-      )
-    })));
-  };
+    // ---------- Firebase sync helpers ----------
+    function syncCharacterToFirebase(app, charId) {
+      if (!app.state.session.active || !app.state.session.ref || !charId) return;
+      const char = app.state.characters[charId];
+      if (!char) return;
+      app.state.session.ref.child('characters/' + charId).set(char).catch(console.error);
+    }
 
-  const addStatRow = () => {
-    setNewItem({
-      ...newItem,
-      stats: [...newItem.stats, { name: '', value: '', locked: false }]
-    });
-  };
+    function syncItemVaultToFirebase(app) {
+      if (!app.state.session.active || !app.state.session.ref) return;
+      if (!app.state.session.isDM) return;
+      app.state.session.ref.child('itemVault').set(app.state.itemVault).catch(console.error);
+    }
 
-  const updateStat = (index, field, value) => {
-    const updated = [...newItem.stats];
-    updated[index][field] = value;
-    setNewItem({ ...newItem, stats: updated });
-  };
+    function syncBuffVaultToFirebase(app) {
+      if (!app.state.session.active || !app.state.session.ref) return;
+      if (!app.state.session.isDM) return;
+      app.state.session.ref.child('buffVault').set(app.state.buffVault).catch(console.error);
+    }
 
-  const removeStat = (index) => {
-    setNewItem({
-      ...newItem,
-      stats: newItem.stats.filter((_, i) => i !== index)
-    });
-  };
+    // ---------- Claim/Create modal ----------
+    function showClaimCharacterModal(appInstance) {
+      const chars = Object.values(appInstance.state.characters || {});
+      const options = chars.map(c =>
+        `<option value="${c.id}">${c.name || 'Unnamed Character'}</option>`
+      ).join('');
+      const modal = `
+        <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+          <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+            <h3 class="text-xl font-bold mb-4">Claim or Create Character</h3>
+            ${chars.length ? `
+              <label class="text-sm text-gray-300 mb-1 block">Pick an existing one:</label>
+              <select id="claimSelect" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">${options}</select>
+              <button class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded mb-3"
+                onclick="(function(){ const id=document.getElementById('claimSelect').value; app.claimCharacter(id); document.querySelector('.fixed.inset-0').remove(); })()">
+                ✅ Claim Selected
+              </button>
+            ` : `<div class="text-sm text-gray-400 mb-4">No characters yet. Wait for your DM to create one, or create one below if allowed.</div>`}
+            <div class="border-t border-gray-700 my-3"></div>
+            <label class="text-sm text-gray-300 mb-1 block">...or create new:</label>
+            <input id="newCharName" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-3" placeholder="New character name">
+            <button class="w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded"
+              onclick="(function(){ const name=document.getElementById('newCharName').value||'New Character'; app.createCharacter(name); app.claimCharacter(Object.keys(app.state.characters).pop()); document.querySelector('.fixed.inset-0').remove(); })()">
+              ➕ Create & Use
+            </button>
+          </div>
+        </div>`;
+      document.getElementById('modalContainer').innerHTML = modal;
+    }
 
-  const equipItem = (slot, itemId) => {
-    if (!currentCharacter) return;
-    setCharacters(characters.map(c =>
-      c.id === currentCharacterId
-        ? { ...c, equipment: { ...c.equipment, [slot]: itemId } }
-        : c
-    ));
-  };
+    // ---------- App ----------
+    const app = {
+      state: {
+        characters: {},
+        itemVault: [],
+        buffVault: [],
+        currentCharacter: null,
+        isDMMode: false,
+        undoStack: [],
+        session: {
+          active: false,
+          code: null,
+          isDM: false,
+          assignedCharacter: null,
+          ref: null
+        }
+      },
 
-  const unequipItem = (slot) => {
-    if (!currentCharacter) return;
-    const newEquipment = { ...currentCharacter.equipment };
-    delete newEquipment[slot];
-    setCharacters(characters.map(c =>
-      c.id === currentCharacterId
-        ? { ...c, equipment: newEquipment }
-        : c
-    ));
-  };
+      init() {
+        this.loadState();
+        if (Object.keys(this.state.characters).length === 0) {
+          const id = Date.now().toString();
+          this.state.characters[id] = normalizeCharacter({ id, name: 'New Character' });
+          this.state.currentCharacter = id;
+        }
+        this.render();
+      },
 
-  const calculateTotalStats = () => {
-    if (!currentCharacter) return {};
-    const stats = {};
-    Object.values(currentCharacter.equipment).forEach(itemId => {
-      const item = items.find(i => i.id === itemId);
-      if (item) {
-        item.stats.forEach(stat => {
-          if (isDMMode || !stat.locked) {
-            if (!stats[stat.name]) stats[stat.name] = 0;
-            const val = parseFloat(stat.value) || 0;
-            stats[stat.name] += val;
+      loadState() {
+        const saved = localStorage.getItem('dndEquipmentTracker');
+        if (!saved) return;
+        try {
+          const loaded = JSON.parse(saved);
+          this.state.characters = normalizeAllCharacters(loaded.characters || {});
+          this.state.itemVault = Array.isArray(loaded.itemVault)
+            ? loaded.itemVault.map(normalizeItem)
+            : Array.isArray(loaded.vault)
+              ? loaded.vault.map(normalizeItem)
+              : [];
+          this.state.buffVault = Array.isArray(loaded.buffVault)
+            ? loaded.buffVault.map(normalizeItem)
+            : [];
+          this.state.currentCharacter = loaded.currentCharacter || Object.keys(this.state.characters)[0] || null;
+          this.state.isDMMode = !!loaded.isDMMode;
+          this.state.undoStack = loaded.undoStack || [];
+        } catch (e) {
+          console.error('Error loading state; starting fresh.', e);
+          this.state.characters = {};
+          this.state.itemVault = [];
+          this.state.buffVault = [];
+          this.state.currentCharacter = null;
+          this.state.undoStack = [];
+        }
+      },
+
+      saveState() {
+        const toSave = {
+          characters: this.state.characters,
+          itemVault: this.state.itemVault,
+          buffVault: this.state.buffVault,
+          currentCharacter: this.state.currentCharacter,
+          isDMMode: this.state.isDMMode,
+          undoStack: this.state.undoStack
+        };
+        localStorage.setItem('dndEquipmentTracker', JSON.stringify(toSave));
+      },
+
+      generateSessionCode() {
+        return Math.random().toString(36).substring(2, 8).toUpperCase();
+      },
+
+      attachSessionListeners() {
+        if (!this.state.session.ref) return;
+        const sessionRef = this.state.session.ref;
+
+        // Characters
+        const charsRef = sessionRef.child('characters');
+        charsRef.off();
+
+        charsRef.once('value', snap => {
+          this.state.characters = normalizeAllCharacters(snap.val() || {});
+          if (!this.state.currentCharacter || !this.state.characters[this.state.currentCharacter]) {
+            this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
+          }
+          this.render();
+
+          // Player: prompt claim AFTER characters are loaded
+          if (this.state.session.active && !this.state.session.isDM && !this.state.session.assignedCharacter) {
+            if (Object.keys(this.state.characters).length > 0) {
+              showClaimCharacterModal(this);
+            }
+          }
+        });
+
+        charsRef.on('child_added', snap => {
+          const id = snap.key;
+          const val = snap.val();
+          if (!val) return;
+          this.state.characters[id] = normalizeCharacter({ id, ...val });
+          if (!this.state.currentCharacter) this.state.currentCharacter = id;
+          this.render();
+        });
+
+        charsRef.on('child_changed', snap => {
+          const id = snap.key;
+          const val = snap.val();
+          if (!val) return;
+          this.state.characters[id] = normalizeCharacter({ id, ...val });
+          this.render();
+        });
+
+        charsRef.on('child_removed', snap => {
+          const id = snap.key;
+          delete this.state.characters[id];
+          if (this.state.currentCharacter === id) {
+            this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
+          }
+          this.render();
+        });
+
+        // Item Vault
+        const itemRef = sessionRef.child('itemVault');
+        itemRef.off();
+        itemRef.on('value', snap => {
+          const v = snap.val();
+          this.state.itemVault = Array.isArray(v) ? v.map(normalizeItem) : [];
+          this.render();
+        });
+
+        // Buff Vault
+        const buffRef = sessionRef.child('buffVault');
+        buffRef.off();
+        buffRef.on('value', snap => {
+          const v = snap.val();
+          this.state.buffVault = Array.isArray(v) ? v.map(normalizeItem) : [];
+          this.render();
+        });
+      },
+
+      showHostModal() {
+        if (!firebaseInitialized) {
+          alert('Firebase not configured.');
+          return;
+        }
+        const modal = `
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+              <h3 class="text-xl font-bold mb-4">Host Session (DM)</h3>
+              <p class="text-sm text-gray-400 mb-4">Characters, Item Vault & Buff Vault sync in real-time.</p>
+              <div class="flex gap-2">
+                <button onclick="app.hostSession(); this.closest('.fixed').remove()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded flex-grow">Start Hosting</button>
+                <button onclick="this.closest('.fixed').remove()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+              </div>
+            </div>
+          </div>`;
+        document.getElementById('modalContainer').innerHTML = modal;
+      },
+
+      hostSession() {
+        const code = this.generateSessionCode();
+        this.state.session = {
+          active: true,
+          code,
+          isDM: true,
+          assignedCharacter: null,
+          ref: firebase.database().ref('sessions/' + code)
+        };
+        this.state.isDMMode = true;
+
+        this.state.session.ref.set({
+          characters: this.state.characters,
+          itemVault: this.state.itemVault,
+          buffVault: this.state.buffVault,
+          timestamp: Date.now()
+        }).then(() => {
+          this.attachSessionListeners();
+          this.render();
+          alert(`Session started! Share code: ${code}`);
+        }).catch(err => {
+          console.error('Failed to host session:', err);
+          alert('Failed to host session. Check Firebase config & rules.');
+        });
+      },
+
+      showJoinModal() {
+        if (!firebaseInitialized) {
+          alert('Firebase not configured.');
+          return;
+        }
+        const modal = `
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+              <h3 class="text-xl font-bold mb-4">Join Session (Player)</h3>
+              <p class="text-sm text-gray-400 mb-4">Enter the session code from your DM.</p>
+              <input id="joinCode" placeholder="Enter 6-digit code" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4 uppercase text-center text-2xl">
+              <div class="flex gap-2">
+                <button onclick="app.joinSession(document.getElementById('joinCode').value); this.closest('.fixed').remove()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">Join Session</button>
+                <button onclick="this.closest('.fixed').remove()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+              </div>
+            </div>
+          </div>`;
+        document.getElementById('modalContainer').innerHTML = modal;
+      },
+
+      joinSession(code) {
+        if (!code || code.length !== 6) {
+          alert('Invalid session code');
+          return;
+        }
+        code = code.toUpperCase();
+        this.state.session = {
+          active: true,
+          code,
+          isDM: false,
+          assignedCharacter: null,
+          ref: firebase.database().ref('sessions/' + code)
+        };
+        this.state.isDMMode = false;
+
+        this.attachSessionListeners();
+        this.setupPlayerSync();
+        this.render();
+        alert(`Joined session: ${code}`);
+      },
+
+      setupPlayerSync() {
+        const originalSave = this.saveState.bind(this);
+        this.saveState = () => {
+          originalSave();
+          if (this.state.session.active &&
+              !this.state.session.isDM &&
+              this.state.session.ref &&
+              this.state.session.assignedCharacter) {
+            syncCharacterToFirebase(this, this.state.session.assignedCharacter);
+          }
+        };
+      },
+
+      disconnectSession() {
+        if (this.state.session.ref) {
+          this.state.session.ref.child('characters').off();
+          this.state.session.ref.child('itemVault').off();
+          this.state.session.ref.child('buffVault').off();
+          if (this.state.session.isDM) {
+            if (confirm('Delete session data from server?')) {
+              this.state.session.ref.remove();
+            }
+          }
+        }
+        this.state.session = {
+          active: false,
+          code: null,
+          isDM: false,
+          assignedCharacter: null,
+          ref: null
+        };
+        this.state.isDMMode = false;
+        this.render();
+        alert('Disconnected from session');
+      },
+
+      // Character UI
+      showCreateCharacterModal() {
+        const modal = `
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+              <h3 class="text-xl font-bold mb-4">Create Character</h3>
+              <input id="newCharNameInput" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4" placeholder="Character name">
+              <div class="flex gap-2">
+                <button class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded flex-grow"
+                  onclick="(function(){ const n=document.getElementById('newCharNameInput').value||'New Character'; app.createCharacter(n); document.querySelector('.fixed.inset-0').remove(); })()">
+                  Create
+                </button>
+                <button class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded"
+                  onclick="this.closest('.fixed').remove()">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>`;
+        document.getElementById('modalContainer').innerHTML = modal;
+      },
+
+      claimCharacter(charId) {
+        if (!charId) return;
+        this.state.session.assignedCharacter = charId;
+        this.state.currentCharacter = charId;
+        this.saveState();
+        this.render();
+      },
+
+      createCharacter(name) {
+        const id = Date.now().toString();
+        this.state.characters[id] = normalizeCharacter({ id, name });
+        this.state.currentCharacter = id;
+        this.saveState();
+        if (this.state.session.active && this.state.session.isDM) {
+          syncCharacterToFirebase(this, id);
+        }
+        this.render();
+      },
+
+      cloneCharacter() {
+        if (!this.state.currentCharacter) return;
+        if (!(this.state.session.isDM || !this.state.session.active)) return;
+        const current = this.state.characters[this.state.currentCharacter];
+        const id = Date.now().toString();
+        this.state.characters[id] = normalizeCharacter({
+          id,
+          name: current.name + ' (Copy)',
+          equipment: JSON.parse(JSON.stringify(current.equipment || {})),
+          worldBuffs: JSON.parse(JSON.stringify(current.worldBuffs || {}))
+        });
+        this.state.currentCharacter = id;
+        this.saveState();
+        if (this.state.session.active && this.state.session.isDM) {
+          syncCharacterToFirebase(this, id);
+        }
+        this.render();
+      },
+
+      deleteCharacter() {
+        if (!this.state.currentCharacter) return;
+        if (!(this.state.session.isDM || !this.state.session.active)) return;
+        if (Object.keys(this.state.characters).length === 1) {
+          alert('Cannot delete the last character');
+          return;
+        }
+        const deleted = this.state.characters[this.state.currentCharacter];
+        this.state.undoStack.push({ type: 'character', data: deleted });
+        const toRemoveId = this.state.currentCharacter;
+        delete this.state.characters[toRemoveId];
+        this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
+        this.saveState();
+        if (this.state.session.active && this.state.session.isDM && this.state.session.ref) {
+          this.state.session.ref.child('characters/' + toRemoveId).remove().catch(console.error);
+        }
+        this.render();
+      },
+
+      switchCharacter(id) {
+        if (!id || !this.state.characters[id]) return;
+        // players can only switch to their claimed char
+        if (this.state.session.active && !this.state.session.isDM &&
+            this.state.session.assignedCharacter &&
+            id !== this.state.session.assignedCharacter) {
+          return;
+        }
+        this.state.currentCharacter = id;
+        this.saveState();
+        this.render();
+      },
+
+      // Item / Buff modals unchanged (use normalizeStat)
+
+      showCreateItemModal(existing = null) {
+        if (!canManageItems(this)) { alert('Only the DM can manage items.'); return; }
+        const isEdit = !!existing;
+        const item = existing || { name:'', rarity:'Common', stats:[{ name:'', description:'', locked:false }] };
+
+        const statsHtml = (item.stats || []).map(stat => `
+          <div class="flex gap-2 items-start stat-row">
+            <input type="text" placeholder="Stat name" value="${stat.name || ''}" class="bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name">
+            <textarea placeholder="Description / Value (multiline OK)" class="bg-gray-700 text-white px-3 py-2 rounded w-full stat-desc">${stat.description || ''}</textarea>
+            <button class="bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded"
+              onclick="(function(btn){ const h=btn.nextElementSibling; h.value = h.value === 'true' ? 'false' : 'true'; btn.textContent = h.value === 'true' ? '🔒' : '🔓'; })(this)">
+              ${stat.locked ? '🔒' : '🔓'}
+            </button>
+            <input type="hidden" class="stat-locked" value="${stat.locked ? 'true' : 'false'}">
+            <button onclick="this.closest('.stat-row').remove()" class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded">✕</button>
+          </div>
+        `).join('');
+
+        const modal = `
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto" onclick="this.remove()">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-2xl w-full m-4" onclick="event.stopPropagation()">
+              <h3 class="text-xl font-bold mb-4">${isEdit ? 'Edit Item' : 'Create Item'}</h3>
+              <input type="text" id="itemName" placeholder="Item Name" value="${item.name || ''}" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+              <select id="itemRarity" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+                ${RARITIES.map(r => `<option value="${r}" ${r === item.rarity ? 'selected' : ''}>${r}</option>`).join('')}
+              </select>
+              <div class="mb-4">
+                <div class="flex justify-between items-center mb-2">
+                  <label class="font-semibold">Stats</label>
+                  <button class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm"
+                    onclick="(function(){
+                      const c=document.getElementById('statsContainer');
+                      c.insertAdjacentHTML('beforeend', \`
+                        <div class='flex gap-2 items-start stat-row mt-2'>
+                          <input type='text' placeholder='Stat name' class='bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name'>
+                          <textarea placeholder='Description / Value (multiline OK)' class='bg-gray-700 text-white px-3 py-2 rounded w-full stat-desc'></textarea>
+                          <button class='bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded'
+                            onclick="(function(btn){ const h=btn.nextElementSibling; h.value = h.value === 'true' ? 'false' : 'true'; btn.textContent = h.value === 'true' ? '🔒' : '🔓'; })(this)">🔓</button>
+                          <input type='hidden' class='stat-locked' value='false'>
+                          <button onclick='this.closest(\\' .stat-row \\' ).remove()' class='bg-red-600 hover:bg-red-700 px-3 py-2 rounded'>✕</button>
+                        </div>\`);
+                    })()">
+                    + Add Stat
+                  </button>
+                </div>
+                <div id="statsContainer" class="space-y-2">${statsHtml}</div>
+              </div>
+              <div class="flex gap-2">
+                <button class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow"
+                  onclick="app.saveItem(${isEdit ? `'${item.id}'` : 'null'}); this.closest('.fixed').remove()">
+                  ${isEdit ? 'Save' : 'Create'}
+                </button>
+                <button class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded"
+                  onclick="this.closest('.fixed').remove()">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>`;
+        document.getElementById('modalContainer').innerHTML = modal;
+      },
+
+      saveItem(itemId) {
+        if (!canManageItems(this)) { alert('Only the DM can manage items.'); return; }
+        const name = document.getElementById('itemName').value || 'Unnamed Item';
+        const rarity = document.getElementById('itemRarity').value || 'Common';
+        const rows = document.querySelectorAll('.stat-row');
+        const stats = [];
+        rows.forEach(row => {
+          const n = row.querySelector('.stat-name')?.value || '';
+          const d = row.querySelector('.stat-desc')?.value || '';
+          const l = row.querySelector('.stat-locked')?.value === 'true';
+          if (n.trim() || d.trim()) stats.push(normalizeStat({ name: n, description: d, locked: l }));
+        });
+        const itemData = normalizeItem({
+          id: itemId || Date.now().toString(),
+          name,
+          rarity,
+          stats
+        });
+
+        if (itemId) {
+          const idx = this.state.itemVault.findIndex(i => i.id === itemId);
+          if (idx > -1) this.state.itemVault[idx] = itemData;
+        } else {
+          this.state.itemVault.push(itemData);
+        }
+        this.saveState();
+        syncItemVaultToFirebase(this);
+        this.render();
+      },
+
+      // Buff creation/edit is similar; omitted here to keep tight; same pattern as saveItem using buffVault
+      showCreateBuffModal(existing = null) {
+        if (!canManageBuffs(this)) { alert('Only the DM can manage buffs.'); return; }
+        const isEdit = !!existing;
+        const item = existing || { name:'', rarity:'Common', stats:[{ name:'', description:'', locked:false }] };
+
+        const statsHtml = (item.stats || []).map(stat => `
+          <div class="flex gap-2 items-start stat-row">
+            <input type="text" placeholder="Stat name" value="${stat.name || ''}" class="bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name">
+            <textarea placeholder="Description / Value (multiline OK)" class="bg-gray-700 text-white px-3 py-2 rounded w-full stat-desc">${stat.description || ''}</textarea>
+            <button class="bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded"
+              onclick="(function(btn){ const h=btn.nextElementSibling; h.value = h.value === 'true' ? 'false' : 'true'; btn.textContent = h.value === 'true' ? '🔒' : '🔓'; })(this)">
+              ${stat.locked ? '🔒' : '🔓'}
+            </button>
+            <input type="hidden" class="stat-locked" value="${stat.locked ? 'true' : 'false'}">
+            <button onclick="this.closest('.stat-row').remove()" class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded">✕</button>
+          </div>
+        `).join('');
+
+        const modal = `
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto" onclick="this.remove()">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-2xl w-full m-4" onclick="event.stopPropagation()">
+              <h3 class="text-xl font-bold mb-4">${isEdit ? 'Edit Buff' : 'Create Buff'}</h3>
+              <input type="text" id="buffName" placeholder="Buff Name" value="${item.name || ''}" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+              <select id="buffRarity" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4">
+                ${RARITIES.map(r => `<option value="${r}" ${r === item.rarity ? 'selected' : ''}>${r}</option>`).join('')}
+              </select>
+              <div class="mb-4">
+                <div class="flex justify-between items-center mb-2">
+                  <label class="font-semibold">Stats</label>
+                  <button class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm"
+                    onclick="(function(){
+                      const c=document.getElementById('buffStatsContainer');
+                      c.insertAdjacentHTML('beforeend', \`
+                        <div class='flex gap-2 items-start stat-row mt-2'>
+                          <input type='text' placeholder='Stat name' class='bg-gray-700 text-white px-3 py-2 rounded flex-grow stat-name'>
+                          <textarea placeholder='Description / Value (multiline OK)' class='bg-gray-700 text-white px-3 py-2 rounded w-full stat-desc'></textarea>
+                          <button class='bg-gray-600 hover:bg-gray-700 px-3 py-2 rounded'
+                            onclick="(function(btn){ const h=btn.nextElementSibling; h.value = h.value === 'true' ? 'false' : 'true'; btn.textContent = h.value === 'true' ? '🔒' : '🔓'; })(this)">🔓</button>
+                          <input type='hidden' class='stat-locked' value='false'>
+                          <button onclick='this.closest(\\'.stat-row\\').remove()' class='bg-red-600 hover:bg-red-700 px-3 py-2 rounded'>✕</button>
+                        </div>\`);
+                    })()">
+                    + Add Stat
+                  </button>
+                </div>
+                <div id="buffStatsContainer" class="space-y-2">${statsHtml}</div>
+              </div>
+              <div class="flex gap-2">
+                <button class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow"
+                  onclick="app.saveBuff(${isEdit ? `'${item.id}'` : 'null'}); this.closest('.fixed').remove()">
+                  ${isEdit ? 'Save' : 'Create'}
+                </button>
+                <button class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded"
+                  onclick="this.closest('.fixed').remove()">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>`;
+        document.getElementById('modalContainer').innerHTML = modal;
+      },
+
+      saveBuff(itemId) {
+        if (!canManageBuffs(this)) { alert('Only the DM can manage buffs.'); return; }
+        const name = document.getElementById('buffName').value || 'Unnamed Buff';
+        const rarity = document.getElementById('buffRarity').value || 'Common';
+        const rows = document.querySelectorAll('.stat-row');
+        const stats = [];
+        rows.forEach(row => {
+          const n = row.querySelector('.stat-name')?.value || '';
+          const d = row.querySelector('.stat-desc')?.value || '';
+          const l = row.querySelector('.stat-locked')?.value === 'true';
+          if (n.trim() || d.trim()) stats.push(normalizeStat({ name: n, description: d, locked: l }));
+        });
+        const itemData = normalizeItem({
+          id: itemId || Date.now().toString(),
+          name,
+          rarity,
+          stats
+        });
+
+        if (itemId) {
+          const idx = this.state.buffVault.findIndex(i => i.id === itemId);
+          if (idx > -1) this.state.buffVault[idx] = itemData;
+        } else {
+          this.state.buffVault.push(itemData);
+        }
+        this.saveState();
+        syncBuffVaultToFirebase(this);
+        this.render();
+      },
+
+      // Equip / Unequip
+      equipItem(itemId, slot) {
+        const char = this.state.characters[this.state.currentCharacter];
+        if (!char) return;
+
+        const isWorldBuff = WORLD_BUFF_SLOTS.includes(slot);
+
+        if (isWorldBuff) {
+          if (!canEditWorldBuffs(this)) { alert('You can only equip buffs on your own character.'); return; }
+          char.worldBuffs[slot] = itemId;
+        } else {
+          if (!canEditCurrent(this)) { alert('You can only equip items on your own character.'); return; }
+          char.equipment[slot] = itemId;
+        }
+
+        this.saveState();
+        if (this.state.session.active) {
+          const targetId = this.state.session.isDM
+            ? this.state.currentCharacter
+            : this.state.session.assignedCharacter || this.state.currentCharacter;
+          syncCharacterToFirebase(this, targetId);
+        }
+        this.render();
+      },
+
+      unequipItem(slot) {
+        const char = this.state.characters[this.state.currentCharacter];
+        if (!char) return;
+
+        const isWorldBuff = WORLD_BUFF_SLOTS.includes(slot);
+
+        if (isWorldBuff) {
+          if (!canEditWorldBuffs(this)) { alert('You can only unequip buffs on your own character.'); return; }
+          delete char.worldBuffs[slot];
+        } else {
+          if (!canEditCurrent(this)) { alert('You can only unequip items on your own character.'); return; }
+          delete char.equipment[slot];
+        }
+
+        this.saveState();
+        if (this.state.session.active) {
+          const targetId = this.state.session.isDM
+            ? this.state.currentCharacter
+            : this.state.session.assignedCharacter || this.state.currentCharacter;
+          syncCharacterToFirebase(this, targetId);
+        }
+        this.render();
+      },
+
+      // Undo
+      undo() {
+        if (this.state.undoStack.length === 0) return;
+        const action = this.state.undoStack.pop();
+        if (action.type === 'character') {
+          this.state.characters[action.data.id] = action.data;
+          this.state.currentCharacter = action.data.id;
+          if (this.state.session.active && this.state.session.isDM) {
+            syncCharacterToFirebase(this, action.data.id);
+          }
+        } else if (action.type === 'item') {
+          this.state.itemVault.push(action.data);
+          syncItemVaultToFirebase(this);
+        } else if (action.type === 'buff') {
+          this.state.buffVault.push(action.data);
+          syncBuffVaultToFirebase(this);
+        }
+        this.saveState();
+        this.render();
+      },
+
+      // Export / Import as JSON file, backward compatible with old token
+      showExportModal() {
+        const modal = `
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+              <h3 class="text-xl font-bold mb-4">Export Backup</h3>
+              <p class="text-sm text-gray-400 mb-4">Download a JSON backup of all characters, items, and buffs.</p>
+              <button onclick="app.exportToken(); this.closest('.fixed').remove()" class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded">
+                💾 Download Backup
+              </button>
+              <button onclick="this.closest('.fixed').remove()" class="w-full bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded mt-3">
+                Cancel
+              </button>
+            </div>
+          </div>`;
+        document.getElementById('modalContainer').innerHTML = modal;
+      },
+
+      exportToken() {
+        const data = {
+          type: 'full-backup',
+          characters: this.state.characters,
+          itemVault: this.state.itemVault,
+          buffVault: this.state.buffVault,
+          timestamp: Date.now()
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'dnd-equipment-backup.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      },
+
+      showImportModal() {
+        const modal = `
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full m-4" onclick="event.stopPropagation()">
+              <h3 class="text-xl font-bold mb-4">Import Backup</h3>
+              <p class="text-sm text-gray-400 mb-2">Paste JSON backup or old base64 token:</p>
+              <textarea id="importToken" class="w-full bg-gray-700 text-white px-3 py-2 rounded mb-4 h-32" placeholder="Paste here..."></textarea>
+              <div class="flex gap-2">
+                <button onclick="app.importToken(document.getElementById('importToken').value); this.closest('.fixed').remove()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded flex-grow">Import</button>
+                <button onclick="this.closest('.fixed').remove()" class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">Cancel</button>
+              </div>
+            </div>
+          </div>`;
+        document.getElementById('modalContainer').innerHTML = modal;
+      },
+
+      importToken(raw) {
+        if (!raw.trim()) return;
+        let data = null;
+        try {
+          // try JSON
+          data = JSON.parse(raw);
+        } catch {
+          try {
+            data = JSON.parse(atob(raw.trim()));
+          } catch {
+            alert('Invalid backup format');
+            return;
+          }
+        }
+        if (!data || data.type !== 'full-backup') {
+          alert('Invalid backup data');
+          return;
+        }
+        if (!confirm('This will replace ALL current local data. Continue?')) return;
+
+        this.state.characters = normalizeAllCharacters(data.characters || {});
+        this.state.itemVault = Array.isArray(data.itemVault) ? data.itemVault.map(normalizeItem) : [];
+        this.state.buffVault = Array.isArray(data.buffVault) ? data.buffVault.map(normalizeItem) : [];
+        this.state.currentCharacter = Object.keys(this.state.characters)[0] || null;
+        this.saveState();
+
+        if (this.state.session.active && this.state.session.isDM && this.state.session.ref) {
+          this.state.session.ref.child('characters').set(this.state.characters);
+          this.state.session.ref.child('itemVault').set(this.state.itemVault);
+          this.state.session.ref.child('buffVault').set(this.state.buffVault);
+        }
+
+        this.render();
+        alert('Backup restored!');
+      },
+
+      // Search filters
+      filterItemVault(q) {
+        const items = document.querySelectorAll('#vaultItems > div');
+        const term = (q || '').toLowerCase();
+        items.forEach(el => {
+          const name = el.querySelector('.item-name')?.textContent.toLowerCase() || '';
+          el.style.display = name.includes(term) ? 'block' : 'none';
+        });
+      },
+
+      filterBuffVault(q) {
+        const items = document.querySelectorAll('#vaultBuffs > div');
+        const term = (q || '').toLowerCase();
+        items.forEach(el => {
+          const name = el.querySelector('.item-name')?.textContent.toLowerCase() || '';
+          el.style.display = name.includes(term) ? 'block' : 'none';
+        });
+      },
+
+      // Total stats
+      calculateTotalStats() {
+        const char = this.state.characters[this.state.currentCharacter];
+        if (!char) return { stats: {}, hasHidden: false };
+        const totals = {};
+        let hasHidden = false;
+
+        const applyItem = (itemId) => {
+          const item =
+            this.state.itemVault.find(i => i.id === itemId) ||
+            this.state.buffVault.find(i => i.id === itemId);
+          if (!item || !Array.isArray(item.stats)) return;
+
+          item.stats.forEach(stat => {
+            if (stat.locked && !this.state.session.isDM) {
+              hasHidden = true;
+              return;
+            }
+            const key = (stat.name || '').trim();
+            if (!key) return;
+            const source = (stat.value != null) ? stat.value : stat.description;
+            const match = String(source).match(/[-+]?\d*\.?\d+/);
+            if (!match) return;
+            const val = parseFloat(match[0]);
+            if (isNaN(val)) return;
+            totals[key] = (totals[key] || 0) + val;
+          });
+        };
+
+        Object.values(char.equipment || {}).forEach(applyItem);
+        Object.values(char.worldBuffs || {}).forEach(applyItem);
+
+        return { stats: totals, hasHidden };
+      },
+
+      // ---------- Render ----------
+      render() {
+        this.renderCharacterSelect();
+        this.renderWorldBuffs();
+        this.renderEquipmentSlots();
+        this.renderItemVault();
+        this.renderBuffVault();
+        this.renderTotalStats();
+        this.renderSessionStatus();
+        this.renderUndoButton();
+        this.renderPermissions();
+      },
+
+      renderCharacterSelect() {
+        const select = document.getElementById('characterSelect');
+        const isPlayer = this.state.session.active && !this.state.session.isDM;
+
+        if (isPlayer && this.state.session.assignedCharacter) {
+          const mine = this.state.session.assignedCharacter;
+          const mineChar = this.state.characters[mine];
+          const others = Object.values(this.state.characters).filter(c => c.id !== mine);
+          select.innerHTML =
+            `<option value="${mine}" selected>${mineChar?.name || 'My Character'}</option>` +
+            others.map(c => `<option value="${c.id}" disabled>👁 ${c.name}</option>`).join('');
+          return;
+        }
+
+        select.innerHTML = Object.values(this.state.characters)
+          .map(c => `<option value="${c.id}" ${c.id === this.state.currentCharacter ? 'selected' : ''}>${c.name}</option>`)
+          .join('');
+      },
+
+      renderWorldBuffs() {
+        const char = this.state.characters[this.state.currentCharacter] || {};
+        const container = document.getElementById('worldBuffs');
+        const buffs = char.worldBuffs || {};
+        const canEdit = canEditWorldBuffs(this);
+
+        container.innerHTML = WORLD_BUFF_SLOTS.map(slot => {
+          const itemId = buffs[slot];
+          const item =
+            itemId &&
+            (this.state.buffVault.find(i => i.id === itemId) ||
+             this.state.itemVault.find(i => i.id === itemId));
+          if (item) {
+            const visibleStats = (item.stats || []).filter(s =>
+              this.state.session.isDM || !s.locked
+            );
+            return `
+              <div class="bg-gray-700 rounded-lg p-4 slot-filled rarity-${(item.rarity || 'Common').toLowerCase().replace(' ','')}">
+                <div class="flex justify-between items-start mb-2">
+                  <div>
+                    <div class="font-bold">${slot}</div>
+                    <div class="text-sm text-blue-300 item-name">${item.name}</div>
+                    <div class="text-xs text-gray-400">${item.rarity}</div>
+                  </div>
+                  ${canEdit ? `<button onclick="app.unequipItem('${slot}')" class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-sm">Unequip</button>` : ''}
+                </div>
+                ${visibleStats.length ? `
+                  <div class="text-sm mt-2 space-y-1">
+                    ${visibleStats.map(s =>
+                      `<div><span class="font-semibold">${s.name}:</span> <span class="text-green-400 whitespace-pre-wrap">${s.description}</span></div>`
+                    ).join('')}
+                  </div>` : ''
+                }
+              </div>`;
+          } else {
+            return `
+              <div class="bg-gray-700 rounded-lg p-4 slot-empty">
+                <div class="font-bold text-gray-400">${slot}</div>
+                <div class="text-sm text-gray-500 mb-2">Empty</div>
+                ${canEdit ? `
+                  <select onchange="if(this.value){ app.equipItem(this.value, '${slot}'); this.value=''; }" class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
+                    <option value="">Equip from Buff Vault...</option>
+                    ${this.state.buffVault.map(v => `<option value="${v.id}">${v.name}</option>`).join('')}
+                  </select>` : ''
+                }
+              </div>`;
+          }
+        }).join('');
+      },
+
+      renderEquipmentSlots() {
+        const char = this.state.characters[this.state.currentCharacter] || {};
+        const container = document.getElementById('equipmentSlots');
+        const equip = char.equipment || {};
+        const canEdit = canEditCurrent(this);
+
+        container.innerHTML = SLOTS.map(slot => {
+          const itemId = equip[slot];
+          const item =
+            itemId &&
+            (this.state.itemVault.find(i => i.id === itemId) ||
+             this.state.buffVault.find(i => i.id === itemId));
+          if (item) {
+            const visibleStats = (item.stats || []).filter(s =>
+              this.state.session.isDM || !s.locked
+            );
+            return `
+              <div class="bg-gray-700 rounded-lg p-4 slot-filled rarity-${(item.rarity || 'Common').toLowerCase().replace(' ','')}">
+                <div class="flex justify-between items-start mb-2">
+                  <div>
+                    <div class="font-bold">${slot}</div>
+                    <div class="text-sm text-blue-300 item-name">${item.name}</div>
+                    <div class="text-xs text-gray-400">${item.rarity}</div>
+                  </div>
+                  ${canEdit ? `<button onclick="app.unequipItem('${slot}')" class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-sm">Unequip</button>` : ''}
+                </div>
+                ${visibleStats.length ? `
+                  <div class="text-sm mt-2 space-y-1">
+                    ${visibleStats.map(s =>
+                      `<div><span class="font-semibold">${s.name}:</span> <span class="text-green-400 whitespace-pre-wrap">${s.description}</span></div>`
+                    ).join('')}
+                  </div>` : ''
+                }
+              </div>`;
+          } else {
+            return `
+              <div class="bg-gray-700 rounded-lg p-4 slot-empty">
+                <div class="font-bold text-gray-400">${slot}</div>
+                <div class="text-sm text-gray-500 mb-2">Empty</div>
+                ${canEdit ? `
+                  <select onchange="if(this.value){ app.equipItem(this.value, '${slot}'); this.value=''; }" class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
+                    <option value="">Equip from Item Vault...</option>
+                    ${this.state.itemVault.map(v => `<option value="${v.id}">${v.name}</option>`).join('')}
+                  </select>` : ''
+                }
+              </div>`;
+          }
+        }).join('');
+      },
+
+      renderItemVault() {
+        const container = document.getElementById('vaultItems');
+        if (!this.state.itemVault.length) {
+          container.innerHTML = '<div class="text-gray-500 text-center py-4">No items in vault</div>';
+          return;
+        }
+        const isDM = canManageItems(this);
+
+        // Hide items that are currently equipped by any character
+        const equippedIds = new Set();
+        Object.values(this.state.characters).forEach(c => {
+          Object.values(c.equipment || {}).forEach(id => equippedIds.add(id));
+        });
+
+        const visibleItems = this.state.itemVault.filter(i => !equippedIds.has(i.id));
+
+        if (!visibleItems.length) {
+          container.innerHTML = '<div class="text-gray-500 text-center py-4">All items are currently equipped</div>';
+          return;
+        }
+
+        const canEquipHere =
+          this.state.session.isDM ||
+          !this.state.session.active ||
+          canEditCurrent(this);
+
+        container.innerHTML = visibleItems.map(item => {
+          const visibleStats = (item.stats || []).filter(s =>
+            this.state.session.isDM || !s.locked
+          );
+          return `
+            <div class="bg-gray-700 rounded-lg p-3 rarity-${(item.rarity || 'Common').toLowerCase().replace(' ','')}">
+              <div class="flex justify-between items-start mb-2">
+                <div class="flex-grow">
+                  <div class="font-bold item-name">${item.name}</div>
+                  <div class="text-xs text-gray-400">${item.rarity}</div>
+                </div>
+                ${isDM ? `
+                  <div class="flex gap-1">
+                    <button onclick="app.showCreateItemModal(${`{id:'${item.id}',name:\`${item.name}\`,rarity:'${item.rarity}',stats:${JSON.stringify(item.stats)}}`})" class="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs">Edit</button>
+                    <button onclick="app.duplicateItem && app.duplicateItem('${item.id}')" class="bg-yellow-600 hover:bg-yellow-700 px-2 py-1 rounded text-xs">Copy</button>
+                    <button onclick="app.deleteItem && app.deleteItem('${item.id}')" class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs">Del</button>
+                  </div>` : ''
+                }
+              </div>
+              ${visibleStats.length ? `
+                <div class="text-xs space-y-1 mb-2">
+                  ${visibleStats.map(s =>
+                    `<div><span class="font-semibold">${s.name}:</span> <span class="text-green-400 whitespace-pre-wrap">${s.description}</span></div>`
+                  ).join('')}
+                </div>` : ''
+              }
+              ${canEquipHere ? `
+                <select onchange="if(this.value){ app.equipItem('${item.id}', this.value); this.value=''; }" class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
+                  <option value="">Equip to...</option>
+                  ${SLOTS.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>` : ''
+              }
+            </div>`;
+        }).join('');
+      },
+
+      renderBuffVault() {
+        const container = document.getElementById('vaultBuffs');
+        if (!this.state.buffVault.length) {
+          container.innerHTML = '<div class="text-gray-500 text-center py-4">No buffs in vault</div>';
+          return;
+        }
+        const isDM = canManageBuffs(this);
+        const canEquipHere =
+          this.state.session.isDM ||
+          !this.state.session.active ||
+          canEditWorldBuffs(this);
+
+        container.innerHTML = this.state.buffVault.map(item => {
+          const visibleStats = (item.stats || []).filter(s =>
+            this.state.session.isDM || !s.locked
+          );
+          return `
+            <div class="bg-gray-700 rounded-lg p-3 rarity-${(item.rarity || 'Common').toLowerCase().replace(' ','')}">
+              <div class="flex justify-between items-start mb-2">
+                <div class="flex-grow">
+                  <div class="font-bold item-name">${item.name}</div>
+                  <div class="text-xs text-gray-400">${item.rarity}</div>
+                </div>
+                ${isDM ? `
+                  <div class="flex gap-1">
+                    <button onclick="app.showCreateBuffModal(${`{id:'${item.id}',name:\`${item.name}\`,rarity:'${item.rarity}',stats:${JSON.stringify(item.stats)}}`})" class="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs">Edit</button>
+                    <button onclick="app.duplicateBuff && app.duplicateBuff('${item.id}')" class="bg-yellow-600 hover:bg-yellow-700 px-2 py-1 rounded text-xs">Copy</button>
+                    <button onclick="app.deleteBuff && app.deleteBuff('${item.id}')" class="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs">Del</button>
+                  </div>` : ''
+                }
+              </div>
+              ${visibleStats.length ? `
+                <div class="text-xs space-y-1 mb-2">
+                  ${visibleStats.map(s =>
+                    `<div><span class="font-semibold">${s.name}:</span> <span class="text-green-400 whitespace-pre-wrap">${s.description}</span></div>`
+                  ).join('')}
+                </div>` : ''
+              }
+              ${canEquipHere ? `
+                <select onchange="if(this.value){ app.equipItem('${item.id}', this.value); this.value=''; }" class="w-full bg-gray-600 text-white px-2 py-1 rounded text-sm">
+                  <option value="">Equip to...</option>
+                  ${WORLD_BUFF_SLOTS.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>` : ''
+              }
+            </div>`;
+        }).join('');
+      },
+
+      renderTotalStats() {
+        const { stats, hasHidden } = this.calculateTotalStats();
+        const container = document.getElementById('totalStats');
+        const entries = Object.entries(stats);
+        if (!entries.length) {
+          container.innerHTML = '<div class="col-span-full text-gray-500 text-center py-4">No equipment stats</div>';
+          return;
+        }
+        container.innerHTML =
+          entries.map(([name, value]) => `
+            <div class="bg-gray-700 rounded p-3">
+              <div class="text-sm text-gray-400">${name}</div>
+              <div class="text-xl font-bold text-green-400">${value > 0 ? '+' : ''}${value}</div>
+            </div>
+          `).join('') +
+          (this.state.session.isDM && hasHidden
+            ? `<div class="col-span-full bg-yellow-900 bg-opacity-30 rounded p-3 text-yellow-400 text-sm text-center">
+                 🔒 Some totals include hidden stats (DM view)
+               </div>`
+            : '');
+      },
+
+      renderSessionStatus() {
+        const statusEl = document.getElementById('sessionStatus');
+        const infoEl = document.getElementById('activeSessionInfo');
+        const codeEl = document.getElementById('sessionCode');
+        if (this.state.session.active) {
+          statusEl.innerHTML =
+            `<span class="w-2 h-2 bg-green-500 rounded-full pulse-online"></span>` +
+            `<span class="text-sm font-bold text-green-400">${this.state.session.isDM ? 'Hosting' : 'Connected'}</span>`;
+          infoEl.classList.remove('hidden');
+          codeEl.textContent = this.state.session.code;
+        } else {
+          statusEl.innerHTML = '<span class="text-sm text-gray-400">Offline</span>';
+          infoEl.classList.add('hidden');
+        }
+      },
+
+      renderUndoButton() {
+        const btn = document.getElementById('undoBtn');
+        if (!btn) return;
+        if (this.state.undoStack.length > 0) {
+          btn.classList.remove('hidden');
+        } else {
+          btn.classList.add('hidden');
+        }
+      },
+
+      renderPermissions() {
+        const isDM = this.state.session.isDM || !this.state.session.active;
+
+        const controls = [
+          ['addItemBtn', canManageItems(this)],
+          ['addBuffBtn', canManageBuffs(this)],
+          ['newCharBtn', isDM],
+          ['cloneCharBtn', isDM],
+          ['deleteCharBtn', isDM]
+        ];
+
+        controls.forEach(([id, allowed]) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          if (!allowed) {
+            el.disabled = true;
+            el.classList.add('opacity-50', 'cursor-not-allowed');
+          } else {
+            el.disabled = false;
+            el.classList.remove('opacity-50', 'cursor-not-allowed');
           }
         });
       }
-    });
-    return stats;
-  };
-
-  const exportToken = (isPlayerToken = false) => {
-    const data = {
-      characters: characters.map(c => ({
-        ...c,
-        equipment: c.equipment
-      })),
-      items: isPlayerToken
-        ? items.map(item => ({
-            ...item,
-            stats: item.stats.filter(s => !s.locked)
-          }))
-        : items
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `dnd-${isPlayerToken ? 'player' : 'dm'}-token.json`;
-    a.click();
-  };
 
-  const importToken = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = JSON.parse(e.target.result);
-        setCharacters(data.characters || []);
-        setItems(data.items || []);
-        if (data.characters?.length > 0) {
-          setCurrentCharacterId(data.characters[0].id);
-        }
-        setShowImportModal(false);
-      } catch (error) {
-        alert('Invalid token file');
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  const filteredItems = items.filter(item =>
-    item.name.toLowerCase().includes(itemSearch.toLowerCase())
-  );
-
-  const availableItems = filteredItems.filter(item =>
-    !Object.values(currentCharacter?.equipment || {}).includes(item.id)
-  );
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-gray-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-4xl font-bold text-amber-400 mb-2">D&D Equipment Tracker</h1>
-            <p className="text-gray-400">Manage your party's gear and stats</p>
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={() => setIsDMMode(!isDMMode)}
-              className={`px-4 py-2 rounded-lg flex items-center gap-2 transition ${
-                isDMMode
-                  ? 'bg-purple-600 hover:bg-purple-700'
-                  : 'bg-blue-600 hover:bg-blue-700'
-              }`}
-            >
-              {isDMMode ? <Eye size={20} /> : <EyeOff size={20} />}
-              {isDMMode ? 'DM Mode' : 'Player Mode'}
-            </button>
-            <button
-              onClick={() => exportToken(false)}
-              className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg flex items-center gap-2 transition"
-            >
-              <Download size={20} />
-              DM Token
-            </button>
-            <button
-              onClick={() => exportToken(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg flex items-center gap-2 transition"
-            >
-              <Download size={20} />
-              Player Token
-            </button>
-            <button
-              onClick={() => setShowImportModal(true)}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg flex items-center gap-2 transition"
-            >
-              <Upload size={20} />
-              Import
-            </button>
-          </div>
-        </div>
-
-        {/* Character Selection */}
-        <div className="bg-gray-800 rounded-lg p-4 mb-6 border border-gray-700">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold text-amber-400">Characters</h2>
-            <button
-              onClick={() => setShowCharacterModal(true)}
-              className="px-3 py-1 bg-amber-600 hover:bg-amber-700 rounded flex items-center gap-2 transition"
-            >
-              <Plus size={16} />
-              New Character
-            </button>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            {characters.map(char => (
-              <div key={char.id} className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentCharacterId(char.id)}
-                  className={`px-4 py-2 rounded-lg transition flex items-center gap-2 ${
-                    currentCharacterId === char.id
-                      ? 'bg-amber-600 text-white'
-                      : 'bg-gray-700 hover:bg-gray-600'
-                  }`}
-                >
-                  <User size={16} />
-                  {char.name}
-                </button>
-                {isDMMode && (
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => cloneCharacter(char)}
-                      className="p-1 bg-blue-600 hover:bg-blue-700 rounded transition"
-                      title="Clone Character"
-                    >
-                      <Copy size={14} />
-                    </button>
-                    <button
-                      onClick={() => deleteCharacter(char.id)}
-                      className="p-1 bg-red-600 hover:bg-red-700 rounded transition"
-                      title="Delete Character"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {currentCharacter ? (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Equipment Slots */}
-            <div className="lg:col-span-2">
-              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <h2 className="text-2xl font-bold text-amber-400 mb-4">
-                  {currentCharacter.name}'s Equipment
-                </h2>
-                {currentCharacter.class && (
-                  <p className="text-gray-400 mb-4">
-                    Level {currentCharacter.level} {currentCharacter.race} {currentCharacter.class}
-                  </p>
-                )}
-                <div className="grid grid-cols-2 gap-3">
-                  {EQUIPMENT_SLOTS.map(slot => {
-                    const itemId = currentCharacter.equipment[slot];
-                    const item = items.find(i => i.id === itemId);
-                    return (
-                      <div key={slot} className="bg-gray-700 rounded-lg p-3 border border-gray-600">
-                        <div className="text-sm text-gray-400 mb-2">{slot}</div>
-                        {item ? (
-                          <div className="group">
-                            <div className={`font-semibold ${RARITIES.find(r => r.name === item.rarity)?.color || 'text-gray-300'}`}>
-                              {item.name}
-                            </div>
-                            {item.stats.filter(s => isDMMode || !s.locked).length > 0 && (
-                              <div className="text-xs text-gray-400 mt-1">
-                                {item.stats
-                                  .filter(s => isDMMode || !s.locked)
-                                  .map((s, i) => (
-                                    <div key={i} className="flex items-center gap-1">
-                                      {isDMMode && s.locked && <Lock size={10} className="text-red-400" />}
-                                      {s.name}: {s.value}
-                                    </div>
-                                  ))}
-                              </div>
-                            )}
-                            <button
-                              onClick={() => unequipItem(slot)}
-                              className="text-xs text-red-400 hover:text-red-300 mt-1 opacity-0 group-hover:opacity-100 transition"
-                            >
-                              Unequip
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="text-gray-500 italic text-sm">Empty</div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Total Stats */}
-                {Object.keys(calculateTotalStats()).length > 0 && (
-                  <div className="mt-6 bg-gray-900 rounded-lg p-4 border border-amber-600">
-                    <h3 className="text-lg font-bold text-amber-400 mb-2">Total Stats</h3>
-                    <div className="grid grid-cols-2 gap-2">
-                      {Object.entries(calculateTotalStats()).map(([stat, value]) => (
-                        <div key={stat} className="text-sm">
-                          <span className="text-gray-400">{stat}:</span>{' '}
-                          <span className="text-white font-semibold">
-                            {value > 0 ? '+' : ''}{value}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Item Vault */}
-            <div className="lg:col-span-1">
-              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-bold text-amber-400">Item Vault</h2>
-                  {isDMMode && (
-                    <button
-                      onClick={() => setShowItemModal(true)}
-                      className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded flex items-center gap-2 transition"
-                    >
-                      <Plus size={16} />
-                      Create
-                    </button>
-                  )}
-                </div>
-                <div className="mb-4">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
-                    <input
-                      type="text"
-                      placeholder="Search items..."
-                      value={itemSearch}
-                      onChange={(e) => setItemSearch(e.target.value)}
-                      className="w-full pl-10 pr-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm focus:outline-none focus:border-amber-500"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {availableItems.map(item => (
-                    <div key={item.id} className="bg-gray-700 rounded-lg p-3 border border-gray-600">
-                      <div className={`font-semibold ${RARITIES.find(r => r.name === item.rarity)?.color || 'text-gray-300'}`}>
-                        {item.name}
-                      </div>
-                      {item.description && (
-                        <div className="text-xs text-gray-400 mt-1">{item.description}</div>
-                      )}
-                      {item.stats.filter(s => isDMMode || !s.locked).length > 0 && (
-                        <div className="text-xs text-gray-400 mt-2">
-                          {item.stats
-                            .filter(s => isDMMode || !s.locked)
-                            .map((s, i) => (
-                              <div key={i} className="flex items-center gap-1">
-                                {isDMMode && s.locked && <Lock size={10} className="text-red-400" />}
-                                {s.name}: {s.value}
-                              </div>
-                            ))}
-                        </div>
-                      )}
-                      <div className="flex gap-1 mt-2">
-                        <select
-                          onChange={(e) => {
-                            if (e.target.value) {
-                              equipItem(e.target.value, item.id);
-                              e.target.value = '';
-                            }
-                          }}
-                          className="flex-1 text-xs bg-gray-600 border border-gray-500 rounded px-2 py-1"
-                          defaultValue=""
-                        >
-                          <option value="">Equip to...</option>
-                          {EQUIPMENT_SLOTS.map(slot => (
-                            <option key={slot} value={slot}>
-                              {slot}
-                            </option>
-                          ))}
-                        </select>
-                        {isDMMode && (
-                          <>
-                            <button
-                              onClick={() => editItem(item)}
-                              className="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs transition"
-                              title="Edit"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => duplicateItem(item)}
-                              className="p-1 bg-green-600 hover:bg-green-700 rounded transition"
-                              title="Duplicate"
-                            >
-                              <Copy size={14} />
-                            </button>
-                            <button
-                              onClick={() => deleteItem(item.id)}
-                              className="p-1 bg-red-600 hover:bg-red-700 rounded transition"
-                              title="Delete"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="bg-gray-800 rounded-lg p-12 text-center border border-gray-700">
-            <p className="text-gray-400 text-lg mb-4">No character selected</p>
-            <button
-              onClick={() => setShowCharacterModal(true)}
-              className="px-6 py-3 bg-amber-600 hover:bg-amber-700 rounded-lg flex items-center gap-2 mx-auto transition"
-            >
-              <Plus size={20} />
-              Create Your First Character
-            </button>
-          </div>
-        )}
-
-        {/* Character Modal */}
-        {showCharacterModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full border border-gray-700">
-              <h3 className="text-xl font-bold text-amber-400 mb-4">Create Character</h3>
-              <div className="space-y-3">
-                <input
-                  type="text"
-                  placeholder="Character Name *"
-                  value={newCharacter.name}
-                  onChange={(e) => setNewCharacter({ ...newCharacter, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-amber-500"
-                />
-                <input
-                  type="text"
-                  placeholder="Class (e.g., Wizard)"
-                  value={newCharacter.class}
-                  onChange={(e) => setNewCharacter({ ...newCharacter, class: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-amber-500"
-                />
-                <input
-                  type="text"
-                  placeholder="Race (e.g., Elf)"
-                  value={newCharacter.race}
-                  onChange={(e) => setNewCharacter({ ...newCharacter, race: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-amber-500"
-                />
-                <input
-                  type="number"
-                  placeholder="Level"
-                  value={newCharacter.level}
-                  onChange={(e) => setNewCharacter({ ...newCharacter, level: parseInt(e.target.value) || 1 })}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-amber-500"
-                />
-                <textarea
-                  placeholder="Notes (optional)"
-                  value={newCharacter.notes}
-                  onChange={(e) => setNewCharacter({ ...newCharacter, notes: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-amber-500 resize-none"
-                  rows="3"
-                />
-              </div>
-              <div className="flex gap-3 mt-4">
-                <button
-                  onClick={createCharacter}
-                  className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition"
-                >
-                  Create
-                </button>
-                <button
-                  onClick={() => {
-                    setShowCharacterModal(false);
-                    setNewCharacter({ name: '', class: '', level: 1, race: '', notes: '' });
-                  }}
-                  className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Item Modal */}
-        {showItemModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 overflow-y-auto">
-            <div className="bg-gray-800 rounded-lg p-6 max-w-2xl w-full border border-gray-700 my-8">
-              <h3 className="text-xl font-bold text-amber-400 mb-4">
-                {editingItem ? 'Edit Item' : 'Create Item'}
-              </h3>
-              <div className="space-y-3">
-                <input
-                  type="text"
-                  placeholder="Item Name *"
-                  value={newItem.name}
-                  onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-amber-500"
-                />
-                <textarea
-                  placeholder="Description"
-                  value={newItem.description}
-                  onChange={(e) => setNewItem({ ...newItem, description: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-amber-500 resize-none"
-                  rows="2"
-                />
-                <select
-                  value={newItem.rarity}
-                  onChange={(e) => setNewItem({ ...newItem, rarity: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-amber-500"
-                >
-                  {RARITIES.map(r => (
-                    <option key={r.name} value={r.name}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
-
-                <div className="border-t border-gray-700 pt-3 mt-3">
-                  <div className="flex justify-between items-center mb-3">
-                    <h4 className="font-semibold text-amber-400">Stats</h4>
-                    <button
-                      onClick={addStatRow}
-                      className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded flex items-center gap-2 text-sm transition"
-                    >
-                      <Plus size={14} />
-                      Add Stat
-                    </button>
-                  </div>
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {newItem.stats.map((stat, index) => (
-                      <div key={index} className="flex gap-2 items-center bg-gray-700 p-2 rounded">
-                        <input
-                          type="text"
-                          placeholder="Stat name"
-                          value={stat.name}
-                          onChange={(e) => updateStat(index, 'name', e.target.value)}
-                          className="flex-1 px-2 py-1 bg-gray-600 border border-gray-500 rounded text-sm focus:outline-none focus:border-amber-500"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Value"
-                          value={stat.value}
-                          onChange={(e) => updateStat(index, 'value', e.target.value)}
-                          className="w-24 px-2 py-1 bg-gray-600 border border-gray-500 rounded text-sm focus:outline-none focus:border-amber-500"
-                        />
-                        <button
-                          onClick={() => updateStat(index, 'locked', !stat.locked)}
-                          className={`p-1 rounded transition ${
-                            stat.locked ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-600 hover:bg-gray-500'
-                          }`}
-                          title={stat.locked ? 'Locked (DM only)' : 'Unlocked (visible to all)'}
-                        >
-                          {stat.locked ? <Lock size={16} /> : <Unlock size={16} />}
-                        </button>
-                        <button
-                          onClick={() => removeStat(index)}
-                          className="p-1 bg-red-600 hover:bg-red-700 rounded transition"
-                        >
-                          <X size={16} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-3 mt-4">
-                <button
-                  onClick={createItem}
-                  className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition"
-                >
-                  {editingItem ? 'Save' : 'Create'}
-                </button>
-                <button
-                  onClick={resetItemForm}
-                  className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Import Modal */}
-        {showImportModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full border border-gray-700">
-              <h3 className="text-xl font-bold text-amber-400 mb-4">Import Token</h3>
-              <p className="text-gray-400 mb-4 text-sm">
-                Select a DM or Player token file to import your campaign data.
-              </p>
-              <input
-                type="file"
-                accept=".json"
-                onChange={importToken}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-amber-600 file:text-white hover:file:bg-amber-700 file:cursor-pointer"
-              />
-              <div className="flex gap-3 mt-4">
-                <button
-                  onClick={() => setShowImportModal(false)}
-                  className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+    window.app = app;
+    window.onload = () => app.init();
+  </script>
+</body>
+</html>
