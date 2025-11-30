@@ -112,7 +112,7 @@
   <div id="modalContainer"></div>
 
   <script>
-    const SLOTS = ['Head','Amulet','Cloak','Armor','Belt','Gloves','Ring 1','Ring 2','Main Hand','Off Hand','Shield','BootS','Misc 1','Misc 2'];
+    const SLOTS = ['Head','Amulet','Cloak','Armor','Belt','Gloves','Ring 1','Ring 2','Main Hand','Off Hand','Legs','Boots','Misc 1','Misc 2'];
     const WORLD_BUFF_SLOTS = ['World Buff 1','World Buff 2','World Buff 3'];
     const RARITIES = ['Common','Uncommon','Rare','Very Rare','Legendary','Artifact'];
     const SLOT_TYPES = [
@@ -126,7 +126,7 @@
   'Ring',
   'Main Hand',
   'Off Hand',
-  'Shield',
+  'Legs',
   'Boots',
   'Misc'
 ];
@@ -257,8 +257,8 @@ function normalizeCharacter(char) {
     case 'Ring':      return ['Ring 1', 'Ring 2'];
     case 'Main Hand': return ['Main Hand'];
     case 'Off Hand':  return ['Off Hand'];
-    case 'Shield':    return ['Shield'];
-    case 'Boots':     return ['BootS']; // matches your SLOTS entry
+    case 'Legs':    return ['Legs'];
+    case 'Boots':     return ['Boots']; // matches your SLOTS entry
     case 'Misc':      return ['Misc 1', 'Misc 2'];
     default:          return SLOTS.slice(); // Any slot
   }
